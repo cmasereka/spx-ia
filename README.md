@@ -67,9 +67,19 @@ python simple_backtest.py
 python interactive_backtest.py --date 2026-02-09 --put-distance 50 --call-distance 50
 ```
 
+**Detailed Trade Information:**
+```bash
+python interactive_backtest.py --date 2026-02-09 --detailed
+```
+
 **Date Range Backtest:**
 ```bash
 python interactive_backtest.py --start-date 2026-02-09 --end-date 2026-02-13
+```
+
+**Detailed Multi-Day Analysis:**
+```bash
+python interactive_backtest.py --start-date 2026-02-09 --end-date 2026-02-11 --detailed
 ```
 
 ### Parameter Optimization
@@ -84,7 +94,37 @@ python interactive_backtest.py --date 2026-02-09 --optimize
 python interactive_backtest.py --date 2026-02-09 --sensitivity
 ```
 
+**All Available Options:**
+```bash
+# Show help with all available flags
+python interactive_backtest.py --help
+
+# Common usage patterns
+python interactive_backtest.py --date 2026-02-09 --detailed --put-distance 75
+python interactive_backtest.py --start-date 2026-02-09 --end-date 2026-02-13 --detailed
+```
+
 ## 📊 Backtesting Results
+
+### Detailed Trade Analysis (--detailed flag)
+
+```
+🟢 TRADE 1: 2026-02-09 - ✓ WIN
+------------------------------------------------------------
+Entry Time:     10:00:00
+SPX Price:      $6925 → $6968 (Δ+43)
+
+IRON CONDOR STRIKES:
+Put Spread:     6850.0P / 6875.0P  (Buy 6850.0 / Sell 6875.0)
+Call Spread:    6975.0C / 7000.0C  (Sell 6975.0 / Buy 7000.0)
+
+TRADE FINANCIALS:
+Entry Credit:   $  269.90  (Premium received)
+Exit Cost:      $   62.50  (Cost to close)
+Net P&L:        $  207.40  (+76.8%)
+Max Profit:     $  269.90
+Max Loss:       $ 2230.10
+```
 
 ### Current Performance (2026-02-09 to 2026-02-13)
 
@@ -175,6 +215,44 @@ entry_times = ["09:45:00", "10:00:00", "10:15:00"]
 - Setup found with minimum credit requirements
 - Positive P&L at exit
 
+## 🔍 Detailed Trade Information
+
+The `--detailed` flag provides comprehensive trade analysis:
+
+### Trade Display Format
+
+**Strike Prices:**
+- **Put Spread**: Long Strike / Short Strike (e.g., 6850P/6875P)
+- **Call Spread**: Short Strike / Long Strike (e.g., 6975C/7000C)
+
+**Financial Breakdown:**
+- **Entry Credit**: Premium received when opening the Iron Condor
+- **Exit Cost**: Cost to close/buy back the position at exit time
+- **Net P&L**: Entry Credit - Exit Cost
+- **SPX Movement**: Underlying price change during trade
+
+**Risk Metrics:**
+- **Max Profit**: Maximum possible profit (usually entry credit)
+- **Max Loss**: Maximum possible loss (spread width - entry credit)
+
+### Example Trade Analysis
+
+```
+🟢 TRADE 1: 2026-02-09 - ✓ WIN
+SPX Price: $6925 → $6968 (Δ+43)
+
+IRON CONDOR STRIKES:
+Put Spread:  6850P/6875P  (Bought 6850P, Sold 6875P)
+Call Spread: 6975C/7000C  (Sold 6975C, Bought 7000C)
+
+TRADE FINANCIALS:
+Entry Credit: $269.90  (Collected premium)
+Exit Cost:    $ 62.50  (Cost to close)
+Net P&L:      $207.40  (+76.8% return)
+```
+
+This shows SPX moved +43 points but stayed within the profitable range (6875-6975), allowing most of the credit to be kept as profit.
+
 ## 🔍 Performance Metrics
 
 ### Key Analytics
@@ -215,12 +293,20 @@ data/processed/parquet_1m/
 
 ## 🚀 Next Steps
 
+### Recently Added
+- ✓ **Detailed Trade Analysis**: Complete strike prices, entry/exit costs, P&L breakdown
+- ✓ **Enhanced CLI**: `--detailed` flag for comprehensive trade information  
+- ✓ **Multi-format Display**: Summary tables for ranges, detailed view for individual trades
+
 ### Potential Enhancements
-- Multi-strategy backtesting (Put spreads, Call spreads)
-- Dynamic position sizing based on volatility
-- Risk management rules (stop losses, profit targets)
-- Portfolio-level analysis across multiple positions
-- Export functionality for results (CSV, JSON)
+- **Multi-Strategy Support**: Put spreads, Call spreads, Strangles
+- **Dynamic Position Sizing**: Based on volatility and risk tolerance
+- **Risk Management Rules**: Stop losses, profit targets, delta hedging
+- **Portfolio-Level Analysis**: Multiple positions, correlation analysis
+- **Export Functionality**: CSV, JSON, Excel formats for results
+- **Real-time Integration**: Live trading capabilities with broker APIs
+- **Advanced Greeks Analysis**: Delta, gamma, theta decay tracking
+- **Market Regime Detection**: Trending vs. ranging market identification
 
 ## 🤝 Contributing
 

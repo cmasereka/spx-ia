@@ -291,17 +291,19 @@ class SimpleBacktester:
         
         return analysis
     
-    def print_results(self, results: List[SimpleBacktestResult], show_details: bool = True):
+    def print_results(self, results: List[SimpleBacktestResult], show_details: bool = True, detailed_trades: bool = False):
         """Print formatted results to console."""
         if not results:
             print("No results to display")
             return
         
-        print(f"\n{'='*80}")
-        print(f"BACKTEST RESULTS - {len(results)} Days")
-        print(f"{'='*80}")
+        print(f"\n{'='*120}")
+        print(f"DETAILED BACKTEST RESULTS - {len(results)} Days")
+        print(f"{'='*120}")
         
-        if show_details:
+        if detailed_trades:
+            self._print_detailed_trades(results)
+        elif show_details:
             print(f"{'Date':<12} {'Entry':<8} {'SPX':<8} {'Credit':<8} {'P&L':<10} {'%':<7} {'Status':<10}")
             print(f"{'-'*80}")
             
@@ -311,7 +313,7 @@ class SimpleBacktester:
                 
                 print(f"{result.date:<12} {result.entry_time:<8} "
                       f"{result.entry_spx_price:<8.0f} ${result.entry_credit:<7.2f} "
-                      f"${result.pnl:<9.2f} {result.pnl_pct:<6.1f}% {status_color:<10}")
+                      f"{result.pnl:<9.2f} {result.pnl_pct:<6.1f}% {status_color:<10}")
         
         # Summary statistics
         analysis = self.analyze_results(results)
@@ -342,7 +344,47 @@ class SimpleBacktester:
             worst = performance['worst_day']  
             print(f"Worst Day:           {worst.date} (${worst.pnl:.2f})")
         
-        print(f"{'='*80}\n")
+        print(f"{'='*120}\n")
+    
+    def _print_detailed_trades(self, results: List[SimpleBacktestResult]):
+        """Print detailed trade information."""
+        for i, result in enumerate(results, 1):
+            status = "✓ WIN" if result.pnl > 0 else "✗ LOSS" if result.success else "✗ SKIP"
+            status_emoji = "🟢" if result.pnl > 0 else "🔴" if result.success else "⚪"
+            
+            print(f"\n{status_emoji} TRADE {i}: {result.date} - {status}")
+            print(f"{'-'*60}")
+            
+            if result.success:
+                # Parse strikes from notes
+                strikes_part = result.notes.split("Strikes: ")[1].split(", Credit:")[0]
+                put_part = strikes_part.split(", Call: ")[0].replace("Put: ", "")
+                call_part = strikes_part.split(", Call: ")[1]
+                
+                put_long, put_short = put_part.split("/")
+                call_short, call_long = call_part.split("/")
+                
+                print(f"Entry Time:     {result.entry_time}")
+                print(f"SPX Price:      ${result.entry_spx_price:.0f} → ${result.exit_spx_price:.0f} (Δ{result.exit_spx_price - result.entry_spx_price:+.0f})")
+                print(f"")
+                print(f"IRON CONDOR STRIKES:")
+                print(f"Put Spread:     {put_long}P / {put_short}P  (Buy {put_long} / Sell {put_short})")
+                print(f"Call Spread:    {call_short}C / {call_long}C  (Sell {call_short} / Buy {call_long})")
+                print(f"")
+                print(f"TRADE FINANCIALS:")
+                print(f"Entry Credit:   ${result.entry_credit:>8.2f}  (Premium received)")
+                print(f"Exit Cost:      ${result.exit_cost:>8.2f}  (Cost to close)")
+                print(f"Net P&L:        ${result.pnl:>8.2f}  ({result.pnl_pct:+.1f}%)")
+                print(f"Max Profit:     ${result.max_profit:>8.2f}")
+                print(f"Max Loss:       ${result.max_loss:>8.2f}")
+            else:
+                print(f"Entry Time:     {result.entry_time}")
+                print(f"SPX Price:      ${result.entry_spx_price:.0f}")
+                print(f"Status:         No viable setup found")
+                print(f"Reason:         {result.notes}")
+            
+            if i < len(results):
+                print(f"")
 
 
 def run_single_day_example():
@@ -363,8 +405,8 @@ def run_single_day_example():
         min_credit=0.50
     )
     
-    # Print result
-    backtester.print_results([result])
+    # Print detailed result
+    backtester.print_results([result], detailed_trades=True)
 
 
 def run_date_range_example():

@@ -251,6 +251,7 @@ def run_interactive_mode():
     parser.add_argument("--end-date", help="End date for range (YYYY-MM-DD)")
     parser.add_argument("--optimize", "-o", action="store_true", help="Run parameter optimization")
     parser.add_argument("--sensitivity", "-s", action="store_true", help="Run sensitivity analysis")
+    parser.add_argument("--detailed", action="store_true", help="Show detailed trade information")
     parser.add_argument("--put-distance", type=int, default=50, help="Put distance from SPX")
     parser.add_argument("--call-distance", type=int, default=50, help="Call distance from SPX")
     parser.add_argument("--spread-width", type=int, default=25, help="Spread width")
@@ -281,7 +282,7 @@ def run_interactive_mode():
             spread_width=args.spread_width,
             min_credit=args.min_credit
         )
-        backtester.print_results([result])
+        backtester.print_results([result], detailed_trades=args.detailed)
         
     # Date range backtest
     elif args.start_date and args.end_date:
@@ -294,18 +295,21 @@ def run_interactive_mode():
             spread_width=args.spread_width,
             min_credit=args.min_credit
         )
-        backtester.print_results(results)
+        backtester.print_results(results, detailed_trades=args.detailed)
         
     else:
         print("SPX 0DTE Interactive Backtester")
         print("Available commands:")
         print("  --date YYYY-MM-DD                    # Single day backtest")
+        print("  --date YYYY-MM-DD --detailed         # Single day with detailed trades")
         print("  --date YYYY-MM-DD --optimize         # Find best parameters")
         print("  --date YYYY-MM-DD --sensitivity      # Parameter sensitivity")
         print("  --start-date YYYY-MM-DD --end-date YYYY-MM-DD  # Date range")
+        print("  --start-date YYYY-MM-DD --end-date YYYY-MM-DD --detailed  # Detailed range")
         print("\nExample:")
+        print("  python interactive_backtest.py --date 2026-02-09 --detailed")
         print("  python interactive_backtest.py --date 2026-02-09 --optimize")
-        print("  python interactive_backtest.py --start-date 2026-02-09 --end-date 2026-02-13")
+        print("  python interactive_backtest.py --start-date 2026-02-09 --end-date 2026-02-13 --detailed")
 
 
 if __name__ == "__main__":
