@@ -82,16 +82,28 @@ class OptionsStrategy:
     
     def update_prices(self, options_data: Dict[str, Dict]):
         """Update current prices for all legs"""
+        updated_count = 0
         for leg in self.legs:
             key = f"{leg.strike}_{leg.option_type.value}"
             if key in options_data:
                 option_data = options_data[key]
+                old_price = leg.current_price
                 leg.current_price = option_data.get('mid_price', leg.current_price)
                 leg.delta = option_data.get('delta', leg.delta)
                 leg.gamma = option_data.get('gamma', leg.gamma)
                 leg.theta = option_data.get('theta', leg.theta)
                 leg.vega = option_data.get('vega', leg.vega)
                 leg.iv = option_data.get('iv', leg.iv)
+                
+                if leg.current_price > 0:
+                    updated_count += 1
+                    logger.debug(f"Updated {key}: {old_price} -> {leg.current_price}")
+                else:
+                    logger.debug(f"No valid price for {key} in options_data")
+            else:
+                logger.debug(f"Key {key} not found in options_data (available: {list(options_data.keys())[:5]}...)")
+        
+        logger.debug(f"Strategy price update: {updated_count}/{len(self.legs)} legs updated")
         
         self._calculate_current_pnl()
     
@@ -156,7 +168,7 @@ class IronCondor(OptionsStrategy):
         self._calculate_iron_condor_metrics()
     
     def _create_legs_from_data(self, options_data: Dict):
-        """Create option legs from market data"""
+        """Create option legs from market data ensuring 4 different strikes"""
         strikes_and_types = [
             (self.put_long_strike, OptionType.PUT, PositionSide.LONG),
             (self.put_short_strike, OptionType.PUT, PositionSide.SHORT),
@@ -164,22 +176,53 @@ class IronCondor(OptionsStrategy):
             (self.call_long_strike, OptionType.CALL, PositionSide.LONG)
         ]
         
-        for strike, option_type, position_side in strikes_and_types:
-            # Find closest available strike
-            available_strikes = [float(key.split('_')[0]) for key in options_data.keys() 
-                               if key.endswith(f'_{option_type.value}')]
+        # Get all available strikes for both puts and calls
+        put_strikes = [float(key.split('_')[0]) for key in options_data.keys() if key.endswith('_put')]
+        call_strikes = [float(key.split('_')[0]) for key in options_data.keys() if key.endswith('_call')]
+        
+        if not put_strikes or not call_strikes:
+            logger.warning(f"Insufficient option data - Puts: {len(put_strikes)}, Calls: {len(call_strikes)}")
+            return
+        
+        # Sort strikes to help with selection
+        put_strikes = sorted(set(put_strikes))
+        call_strikes = sorted(set(call_strikes))
+        
+        # Find 4 different strikes for Iron Condor, ensuring proper ordering
+        used_strikes = set()
+        actual_legs = []
+        
+        for target_strike, option_type, position_side in strikes_and_types:
+            available_strikes = put_strikes if option_type == OptionType.PUT else call_strikes
             
-            if not available_strikes:
-                logger.warning(f"No {option_type.value} options available")
+            # Find the best available strike that hasn't been used and maintains Iron Condor structure
+            best_strike = None
+            best_distance = float('inf')
+            
+            for candidate_strike in available_strikes:
+                # Skip if already used (prevents duplicate strikes)
+                if candidate_strike in used_strikes:
+                    continue
+                
+                # Check if this strike maintains proper Iron Condor ordering
+                if self._is_valid_iron_condor_strike(candidate_strike, option_type, position_side, actual_legs):
+                    distance = abs(candidate_strike - target_strike)
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_strike = candidate_strike
+            
+            if best_strike is None:
+                logger.warning(f"Cannot find suitable {option_type.value} strike for {position_side.value} leg")
                 continue
                 
-            closest_strike = min(available_strikes, key=lambda x: abs(x - strike))
-            key = f"{closest_strike}_{option_type.value}"
+            # Mark strike as used and create the leg
+            used_strikes.add(best_strike)
+            key = f"{best_strike}_{option_type.value}"
             
             if key in options_data:
                 option_info = options_data[key]
                 leg = OptionLeg(
-                    strike=closest_strike,  # Use actual strike, not target
+                    strike=best_strike,
                     option_type=option_type,
                     position_side=position_side,
                     quantity=self.quantity,
@@ -193,8 +236,78 @@ class IronCondor(OptionsStrategy):
                     iv=option_info.get('iv', 0.0)
                 )
                 self.add_leg(leg)
+                actual_legs.append((best_strike, option_type, position_side))
+                logger.debug(f"Added {option_type.value} {position_side.value} leg at strike {best_strike}")
             else:
                 logger.warning(f"Option data not found for {key}")
+        
+        # Validate that we have a proper Iron Condor
+        if len(self.legs) != 4:
+            logger.warning(f"Incomplete Iron Condor: only {len(self.legs)} legs created")
+        else:
+            # Log the final strike structure
+            put_legs = [leg for leg in self.legs if leg.option_type == OptionType.PUT]
+            call_legs = [leg for leg in self.legs if leg.option_type == OptionType.CALL]
+            
+            if len(put_legs) == 2 and len(call_legs) == 2:
+                put_strikes_final = sorted([leg.strike for leg in put_legs])
+                call_strikes_final = sorted([leg.strike for leg in call_legs])
+                logger.info(f"Iron Condor created: Put spread {put_strikes_final[0]}/{put_strikes_final[1]}, Call spread {call_strikes_final[0]}/{call_strikes_final[1]}")
+            else:
+                logger.warning("Invalid Iron Condor leg distribution")
+    
+    def _is_valid_iron_condor_strike(self, candidate_strike: float, option_type: OptionType, 
+                                   position_side: PositionSide, existing_legs: list) -> bool:
+        """
+        Validate if a candidate strike maintains proper Iron Condor structure
+        
+        Iron Condor structure:
+        - Put Long (lowest strike) < Put Short < Call Short < Call Long (highest strike)
+        """
+        if not existing_legs:
+            return True  # First leg, any strike is valid
+        
+        # Get existing strikes by type and position
+        existing_puts = [(strike, pos) for strike, opt_type, pos in existing_legs if opt_type == OptionType.PUT]
+        existing_calls = [(strike, pos) for strike, opt_type, pos in existing_legs if opt_type == OptionType.CALL]
+        
+        if option_type == OptionType.PUT:
+            if position_side == PositionSide.LONG:
+                # Put long should be the lowest strike overall and lower than any existing put short
+                for existing_strike, existing_pos in existing_puts:
+                    if existing_pos == PositionSide.SHORT and candidate_strike >= existing_strike:
+                        return False
+                # Should be lower than any existing call strike
+                for existing_strike, _ in existing_calls:
+                    if candidate_strike >= existing_strike:
+                        return False
+            else:  # PositionSide.SHORT
+                # Put short should be higher than any existing put long but lower than any call strike
+                for existing_strike, existing_pos in existing_puts:
+                    if existing_pos == PositionSide.LONG and candidate_strike <= existing_strike:
+                        return False
+                for existing_strike, _ in existing_calls:
+                    if candidate_strike >= existing_strike:
+                        return False
+        else:  # OptionType.CALL
+            if position_side == PositionSide.SHORT:
+                # Call short should be higher than any put strike but lower than any existing call long
+                for existing_strike, _ in existing_puts:
+                    if candidate_strike <= existing_strike:
+                        return False
+                for existing_strike, existing_pos in existing_calls:
+                    if existing_pos == PositionSide.LONG and candidate_strike >= existing_strike:
+                        return False
+            else:  # PositionSide.LONG
+                # Call long should be the highest strike overall
+                for existing_strike, _ in existing_puts:
+                    if candidate_strike <= existing_strike:
+                        return False
+                for existing_strike, existing_pos in existing_calls:
+                    if existing_pos == PositionSide.SHORT and candidate_strike <= existing_strike:
+                        return False
+        
+        return True
     
     def _calculate_iron_condor_metrics(self):
         """Calculate Iron Condor specific metrics"""

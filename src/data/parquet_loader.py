@@ -234,10 +234,17 @@ class ParquetDataLoader:
         Returns:
             DataFrame with options chain
         """
+        # Enhanced debug logging for troubleshooting
+        logger.debug(f"get_options_chain_at_time called: date={date}, time={time}, "
+                    f"center_strike={center_strike}, strike_range={strike_range}")
+        
         # Load options data for the date
         options_df = self.load_options_data(date)
         if options_df.empty:
+            logger.debug(f"No options data loaded for {date}")
             return pd.DataFrame()
+        
+        logger.debug(f"Loaded options data: {len(options_df)} total rows")
         
         # Convert time to timestamp
         if isinstance(time, str):
@@ -247,41 +254,65 @@ class ParquetDataLoader:
         else:
             timestamp = time
         
+        logger.debug(f"Target timestamp: {timestamp}")
+        
         # Get options at specific timestamp
         try:
-            if timestamp in options_df.index.get_level_values('timestamp'):
+            available_timestamps = options_df.index.get_level_values('timestamp').unique()
+            logger.debug(f"Available timestamps: {len(available_timestamps)} from "
+                        f"{available_timestamps.min()} to {available_timestamps.max()}")
+            
+            if timestamp in available_timestamps:
+                logger.debug(f"Exact timestamp match found for {timestamp}")
                 chain = options_df.loc[timestamp]
             else:
                 # Find nearest timestamp
-                timestamps = options_df.index.get_level_values('timestamp').unique()
-                nearest_ts = timestamps[timestamps <= timestamp]
+                nearest_ts = available_timestamps[available_timestamps <= timestamp]
                 if len(nearest_ts) == 0:
+                    logger.debug(f"No timestamps <= {timestamp} found")
                     return pd.DataFrame()
                 nearest_ts = nearest_ts.max()
+                logger.debug(f"Using nearest timestamp: {nearest_ts} (diff: {timestamp - nearest_ts})")
                 chain = options_df.loc[nearest_ts]
+            
+            logger.debug(f"Chain before filtering: {len(chain)} rows")
             
             # Filter by strikes if requested
             if center_strike is None:
                 # Use current SPX price as center
                 center_strike = self.get_spx_price_at_time(date, time)
                 if center_strike is None:
-                    return chain  # Return unfiltered if no SPX price
+                    logger.debug("No SPX price found, returning unfiltered chain")
+                    filtered_chain = chain.reset_index()
+                    logger.debug(f"Returning unfiltered chain with {len(filtered_chain)} rows")
+                    return filtered_chain
+                logger.debug(f"Using SPX price as center_strike: {center_strike}")
             
             # Apply strike filtering
             strikes = chain.index.get_level_values('strike')
             min_strike = center_strike - strike_range
             max_strike = center_strike + strike_range
             
+            logger.debug(f"Strike filtering: {min_strike} <= strike <= {max_strike}")
+            logger.debug(f"Available strikes range: {strikes.min()} to {strikes.max()}")
+            
             mask = (strikes >= min_strike) & (strikes <= max_strike)
             filtered_chain = chain.loc[mask]
             
+            logger.debug(f"Chain after strike filtering: {len(filtered_chain)} rows")
+            
             # Reset index to make strikes and option type regular columns
             filtered_chain = filtered_chain.reset_index()
+            
+            logger.debug(f"Final result: {len(filtered_chain)} options with strikes: "
+                        f"{filtered_chain['strike'].unique()}")
             
             return filtered_chain
             
         except Exception as e:
             logger.error(f"Error getting options chain at {timestamp}: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             return pd.DataFrame()
     
     def load_date_range(self, start_date: Union[str, datetime],
