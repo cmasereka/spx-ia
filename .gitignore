@@ -1,0 +1,270 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.env.*
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Trading/Financial Data Files
+# ===========================
+# Raw data files - these can be large and should not be in version control
+data/raw/
+data/processed/
+data/external/
+
+# Specific financial data file types
+*.csv
+*.parquet
+*.h5
+*.hdf5
+*.feather
+*.pickle
+*.pkl
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache directories
+cache/
+.cache/
+tmp/
+temp/
+
+# Log files
+logs/
+*.log
+*.log.*
+
+# Configuration files that may contain sensitive information
+config/local_settings.py
+config/production.py
+secrets.json
+api_keys.txt
+.secrets
+
+# API keys and credentials
+.env.local
+.env.production
+.env.staging
+*_credentials.json
+*_api_key.txt
+
+# IDE and Editor files
+# ===================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Operating System Files
+# =====================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+
+# Performance and profiling
+*.prof
+*.lprof
+*.pyprof
+
+# Model files (can be large)
+*.model
+*.pkl.gz
+*.joblib
+
+# Jupyter notebook output (optional - uncomment if you don't want outputs tracked)
+# *.ipynb
+
+# Trading-specific temporary files
+backtest_results/
+optimization_results/
+*.trade_log
+*.position_log
+
+# Large model or data files that shouldn't be in git
+models/
+trained_models/
+*.weights
+*.checkpoint
+
+# Documentation build artifacts
+docs/build/
+docs/source/_build/
+
+# Conda environment files (keep environment.yml but ignore conda-meta)
+conda-meta/
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+
+# Local development overrides
+local_config.py
+dev_settings.py
+debug_config.py

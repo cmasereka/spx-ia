@@ -1,0 +1,9 @@
+# Ignore large tick data files
+data/raw/tick/**/*.csv
+~/temp_tick_data/
+*.parquet
+venv/
+logs/
+*.db
+__pycache__/
+*.pyc
