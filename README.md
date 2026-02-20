@@ -1,294 +1,241 @@
-# SPX 0DTE Options Trading Bot
+# SPX 0DTE Options Backtesting System
 
-A comprehensive Python trading bot for SPX (S&P 500 Index) 0DTE (0 Days to Expiration) options strategies, featuring Iron Condors, Call/Put Spreads, and technical analysis.
+A high-performance Python backtesting system for SPX (S&P 500 Index) 0DTE (0 Days to Expiration) options strategies, featuring Iron Condors with comprehensive parameter optimization and parquet-based data pipeline.
 
-## 🚀 Features
+## 🚀 Current Features
 
-- **Multiple Strategies**: Iron Condor, Call Spreads, Put Spreads
-- **Technical Analysis**: MACD, RSI, Bollinger Bands for entry/exit signals
-- **Local Data Storage**: SQLite database for fast backtesting
-- **Risk Management**: Position sizing, portfolio limits, performance tracking
-- **Data Sources**: ThetaData Terminal REST API + CSV import capability
-- **Comprehensive Backtesting**: P&L analysis, win rates, Sharpe ratios
+- **Production-Ready Backtesting**: Single day and date range backtesting
+- **Parameter Optimization**: Systematic testing of Iron Condor configurations
+- **High-Performance Data Pipeline**: Parquet-based storage with optimized query engine
+- **Comprehensive Analytics**: P&L tracking, win rates, sensitivity analysis
+- **Interactive CLI**: Command-line interface for all backtesting operations
 
 ## 📁 Project Structure
 
 ```
 spx-ai/
-├── main.py                 # Main CLI interface
-├── setup.sh               # Setup script
-├── requirements.txt       # Python dependencies
-├── examples.py           # Usage examples
+├── simple_backtest.py      # Main backtesting pipeline
+├── interactive_backtest.py # Enhanced backtesting with optimization
 ├── config/
-│   ├── settings.py       # Configuration parameters
-│   └── __init__.py
+│   └── settings.py         # Configuration parameters
 ├── src/
 │   ├── data/
-│   │   ├── theta_client.py    # ThetaData API client
-│   │   ├── storage.py         # SQLite data storage
-│   │   ├── downloader.py      # Data download orchestrator
-│   │   └── csv_importer.py    # CSV data import
-│   ├── indicators/
-│   │   └── technical_indicators.py  # MACD, RSI, Bollinger Bands
-│   ├── strategies/
-│   │   └── options_strategies.py    # Options strategy classes
-│   ├── utils/
-│   │   └── risk_management.py       # Risk management & performance
-│   └── backtesting/
+│   │   ├── parquet_loader.py    # Parquet data loading
+│   │   └── query_engine.py      # Optimized query engine
+│   ├── backtesting/
+│   │   ├── iron_condor_loader.py    # Iron Condor data loader
+│   │   └── strategy_adapter.py      # Strategy building
+│   └── utils/
 ├── data/
-│   ├── raw/              # Raw data files
-│   └── processed/        # SQLite database
-└── logs/                 # Application logs
+│   └── processed/
+│       └── parquet_1m/     # Parquet data files (1-minute resolution)
+└── logs/                   # Application logs
 ```
 
 ## ⚙️ Setup & Installation
 
-### 1. Quick Setup
+### Prerequisites
+- Python 3.8+
+- Parquet data files in `data/processed/parquet_1m/`
+- Dependencies: pandas, pyarrow, loguru
+
+### Installation
 ```bash
-# Clone and setup
+# Clone repository
 git clone <repo-url>
 cd spx-ai
-chmod +x setup.sh
-./setup.sh
-```
 
-### 2. Manual Setup
-```bash
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
+# Install dependencies  
 pip install -r requirements.txt
-
-# Copy environment template
-cp .env.template .env
-```
-
-### 3. Configure Credentials
-Edit `.env` file with your ThetaData credentials:
-```bash
-THETA_USERNAME=your_username
-THETA_PASSWORD=your_password
 ```
 
 ## 🎯 Usage
 
-### Basic Commands
+### Basic Backtesting
 
+**Single Day Backtest:**
 ```bash
-# Generate sample data for testing
-python main.py sample --days-back 30
-
-# Check data status
-python main.py status
-
-# Download real data (requires ThetaData credentials)
-python main.py download --days-back 30
-
-# Run Iron Condor backtest
-python main.py backtest --strategy iron_condor --start-date 2024-01-01 --end-date 2024-12-31
-
-# Update existing data
-python main.py download --update
+python simple_backtest.py
 ```
 
-### Strategy Parameters
+**Custom Parameters:**
+```bash
+python interactive_backtest.py --date 2026-02-09 --put-distance 50 --call-distance 50
+```
 
-Edit `config/settings.py` to customize strategies:
+**Date Range Backtest:**
+```bash
+python interactive_backtest.py --start-date 2026-02-09 --end-date 2026-02-13
+```
 
-```python
-IRON_CONDOR_PARAMS = {
-    "put_strike_distance": 50,    # Distance from current price
-    "call_strike_distance": 50,   # Distance from current price
-    "profit_target": 0.5,         # Take profit at 50% of credit
-    "stop_loss": 2.0             # Stop loss at 200% of credit
-}
+### Parameter Optimization
 
-RSI_PARAMS = {
-    "period": 14,
-    "overbought": 70,
-    "oversold": 30
-}
+**Find Best Parameters:**
+```bash
+python interactive_backtest.py --date 2026-02-09 --optimize
+```
+
+**Sensitivity Analysis:**
+```bash
+python interactive_backtest.py --date 2026-02-09 --sensitivity
 ```
 
 ## 📊 Backtesting Results
 
-The bot provides comprehensive analysis:
+### Current Performance (2026-02-09 to 2026-02-13)
 
 ```
-==================================================
-BACKTEST RESULTS SUMMARY
-==================================================
-Period: 2024-01-01 to 2024-12-31
-Total Trades: 157
-Win Rate: 68.2%
-Total P&L: $12,450.00
-Avg P&L per Trade: $79.30
-Max Win: $850.00
-Max Loss: $-2,100.00
-Profit Factor: 1.85
-Sharpe Ratio: 1.42
-Max Drawdown: -8.3%
-==================================================
+================================================================================
+BACKTEST RESULTS - 5 Days
+================================================================================
+Date         Entry    SPX      Credit   P&L        %       Status    
+--------------------------------------------------------------------------------
+2026-02-09   10:00:00 6925     $269.90  $207.40    76.8  % ✓ WIN     
+2026-02-10   10:00:00 6978     $129.90  $117.40    90.4  % ✓ WIN     
+2026-02-11   10:00:00 6961     $219.90  $219.90    100.0 % ✓ WIN     
+2026-02-12   10:00:00 6949     $189.90  $-2295.10  -1208.6% ✗ LOSS    
+2026-02-13   10:00:00 6818     $972.40  $959.90    98.7  % ✓ WIN     
+
+Setup Success Rate:  80.0% (4/5)
+Trading Win Rate:    100.0% (4/4) 
+Total P&L:           $-790.50
+Avg P&L per Day:     $-158.10
 ```
 
-## 🔧 Advanced Usage
+### Parameter Optimization Results
 
-### Custom Strategy Development
+**Best Configuration Found:** P25/C50/W50 (Put 25pt, Call 50pt, Width 50pt)
+- **Entry Credit:** $722.40
+- **P&L:** $714.90 (99.0% return)
+- **Success Rate:** 66.7% of 96 combinations tested
+
+## 🔧 Advanced Configuration
+
+### Strategy Parameters
+
+Edit parameters in backtesting functions:
 
 ```python
-from src.strategies.options_strategies import StrategyBuilder
-
-# Build custom Iron Condor
-ic = StrategyBuilder.build_iron_condor(
-    entry_date=datetime(2024, 1, 15),
-    underlying_price=4500,
-    options_data=options_data,
-    put_distance=75,      # Custom parameters
-    call_distance=75,
-    spread_width=25
-)
-
-# Calculate P&L at different prices
-pnl_4400 = ic.get_profit_at_expiration(4400)
-pnl_4500 = ic.get_profit_at_expiration(4500)
-pnl_4600 = ic.get_profit_at_expiration(4600)
+# Iron Condor Configuration
+put_distance = 50        # Put short strike distance from SPX
+call_distance = 50       # Call short strike distance from SPX  
+spread_width = 25        # Spread width for both sides
+min_credit = 0.50        # Minimum credit required
+entry_time = "10:00:00"  # Entry time
+exit_time = "15:45:00"   # Exit time
 ```
 
-### CSV Data Import
+### Optimization Ranges
 
 ```python
-from src.data.csv_importer import CSVDataImporter
-
-importer = CSVDataImporter()
-
-# Import underlying SPX data
-importer.import_spx_underlying('data/spx_daily.csv')
-
-# Import options chain data
-importer.import_spx_options('data/spx_options.csv')
+# Parameter ranges for optimization
+put_distances = [25, 50, 75, 100]
+call_distances = [25, 50, 75, 100]
+spread_widths = [25, 50]
+entry_times = ["09:45:00", "10:00:00", "10:15:00"]
 ```
 
-### Technical Analysis
+## 🏗️ Architecture
 
-```python
-from src.indicators.technical_indicators import TechnicalIndicators
+### Core Components
 
-indicators = TechnicalIndicators()
+1. **SimpleBacktester** (`simple_backtest.py:42`): Main backtesting engine
+2. **InteractiveBacktester** (`interactive_backtest.py:19`): Enhanced optimization features
+3. **FastQueryEngine** (`src/data/query_engine.py`): Optimized data queries
+4. **IronCondorDataLoader** (`src/backtesting/iron_condor_loader.py`): Strategy-specific data loading
+5. **EnhancedStrategyBuilder** (`src/backtesting/strategy_adapter.py`): Strategy construction
 
-# Calculate all indicators
-df_with_indicators = indicators.calculate_all_indicators(price_df)
+### Data Pipeline
 
-# Generate trading signals
-signals_df = indicators.get_trading_signals(df_with_indicators)
-
-# Check for Iron Condor entry signals
-neutral_days = signals_df[signals_df['neutral_signal'] == True]
-```
+- **Input**: Parquet files with 1-minute SPX and options data
+- **Processing**: Optimized indexing and caching for fast backtesting
+- **Output**: Detailed P&L analysis and performance metrics
 
 ## 📈 Strategy Logic
 
-### Iron Condor Entry Criteria
-- RSI between 40-60 (neutral market)
-- Price within middle 60% of Bollinger Bands
-- Low implied volatility environment
-- No major economic events
+### Iron Condor Implementation
 
-### Entry/Exit Rules
-1. **Entry**: When technical indicators show neutral/range-bound market
-2. **Profit Target**: Close at 25-50% of maximum profit
-3. **Stop Loss**: Close if loss exceeds 200% of credit received
-4. **Time Decay**: Automatic closure at expiration (0DTE)
+**Entry Process:**
+1. Get SPX price at entry time
+2. Find viable Iron Condor setups based on parameters
+3. Build strategy with liquid options
+4. Calculate entry credit
 
-### Risk Management
-- Maximum 2% risk per trade
-- Maximum 20% portfolio risk
-- Position sizing based on confidence score
-- Correlation limits across strategies
+**Exit Process:**
+1. Get SPX price at exit time
+2. Update option prices
+3. Calculate exit cost
+4. Compute P&L = Entry Credit - Exit Cost
 
-## 🛠️ Data Sources
+**Success Criteria:**
+- Setup found with minimum credit requirements
+- Positive P&L at exit
 
-### ThetaData Terminal (Recommended)
-- **Setup**: Download and run ThetaData Terminal locally
-- **Connection**: REST API via http://127.0.0.1:25503
-- **No Python Library**: Uses direct HTTP requests (no installation issues)
-- **Real-time Data**: Live and historical options chains with OHLC
-- **Full Options Greeks**: Delta, gamma, theta, vega, IV (when available)
-- **Subscription Required**: Need ThetaData account
+## 🔍 Performance Metrics
 
-**Quick Setup:**
-1. Download ThetaData Terminal from [thetadata.com](https://thetadata.com)
-2. Login and keep terminal running
-3. Update `.env` with your credentials
-4. See `THETADATA_SETUP.md` for detailed instructions
+### Key Analytics
+- **Setup Success Rate**: Percentage of days with viable strategies
+- **Trading Win Rate**: Percentage of profitable trades (successful setups only)
+- **Total P&L**: Cumulative profit/loss
+- **Average P&L per Day**: Mean daily performance
+- **Credit Collection**: Total premiums collected
 
-### CSV Import (Alternative)
-Support for standard CSV formats:
+### Optimization Targets
+- **P&L**: Maximize absolute profit
+- **P&L %**: Maximize percentage returns
+- **Credit**: Maximize premium collection
 
-**Underlying Data Format:**
-```csv
-date,open,high,low,close,volume
-2024-01-01,4500.00,4520.00,4495.00,4515.00,1000000
+## 📊 Data Requirements
+
+### Parquet File Structure
+```
+data/processed/parquet_1m/
+├── spx_2026-02-09.parquet     # SPX underlying data
+├── options_2026-02-09.parquet # Options chain data
+├── spx_2026-02-10.parquet
+├── options_2026-02-10.parquet
+└── ...
 ```
 
-**Options Data Format:**
-```csv
-date,expiration,strike,option_type,bid,ask,delta,gamma,theta,vega,iv
-2024-01-01,2024-01-01,4500,call,2.50,2.70,0.45,0.02,-0.8,12.5,0.25
-```
+### Required Columns
+**SPX Data**: timestamp, close
+**Options Data**: timestamp, strike, option_type, bid, ask, expiration, delta, gamma, theta, vega
 
-## 🔍 Performance Monitoring
+## ⚠️ Important Notes
 
-### Key Metrics Tracked
-- Win Rate & Profit Factor
-- Average P&L per Trade
-- Maximum Drawdown
-- Sharpe Ratio
-- Risk-Adjusted Returns
-- Strategy-Specific Analytics
+1. **Paper Trading Only**: This system is for backtesting and analysis only
+2. **Historical Data**: Results based on historical market conditions
+3. **Risk Management**: No built-in position sizing or risk controls
+4. **Market Hours**: Designed for regular trading hours (9:30 AM - 4:00 PM ET)
+5. **0DTE Focus**: Optimized for same-day expiration strategies
 
-### Logging & Alerts
-- Comprehensive logging to `logs/` directory
-- Trade execution logs
-- Error handling and debugging
-- Performance monitoring
+## 🚀 Next Steps
 
-## ⚠️ Important Disclaimers
-
-1. **Educational Purpose**: This bot is for educational and research purposes
-2. **Paper Trading**: Test thoroughly with paper trading before live use
-3. **Risk Warning**: Options trading involves substantial risk
-4. **No Financial Advice**: This is not investment advice
-5. **Sample Data**: Generated sample data is NOT for real trading decisions
+### Potential Enhancements
+- Multi-strategy backtesting (Put spreads, Call spreads)
+- Dynamic position sizing based on volatility
+- Risk management rules (stop losses, profit targets)
+- Portfolio-level analysis across multiple positions
+- Export functionality for results (CSV, JSON)
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create feature branch (`git checkout -b feature/new-strategy`)
-3. Commit changes (`git commit -am 'Add new strategy'`)
-4. Push to branch (`git push origin feature/new-strategy`)
+2. Create feature branch (`git checkout -b feature/enhancement`)
+3. Commit changes (`git commit -am 'Add enhancement'`)
+4. Push to branch (`git push origin feature/enhancement`)
 5. Create Pull Request
 
 ## 📄 License
 
 MIT License - See LICENSE file for details
 
-## 🔗 Resources
-
-- [ThetaData API Documentation](https://http-docs.thetadata.us/)
-- [SPX Options Basics](https://www.cboe.com/tradable_products/sp_500/)
-- [0DTE Trading Strategies](https://www.tastytrade.com/concepts-strategies/0dte)
-- [Options Greeks Explained](https://www.investopedia.com/trading/using-the-greeks-to-understand-options/)
-
-## 🆘 Support
-
-- 📧 Issues: Create GitHub issue
-- 📚 Documentation: See `examples.py`
-- 💬 Discussions: GitHub discussions tab
-
 ---
 
-**Happy Trading! 🚀📈**
+**Ready for Production Backtesting! 🚀📊**
 
-*Remember: Past performance does not guarantee future results. Trade responsibly.*
+*Comprehensive SPX 0DTE Iron Condor backtesting with parameter optimization and high-performance data pipeline.*
