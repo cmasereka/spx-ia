@@ -170,8 +170,8 @@ class SimpleBacktester:
             pnl = entry_credit - current_cost
             pnl_pct = (pnl / entry_credit * 100) if entry_credit > 0 else 0
             
-            # Success criteria: profitable trade
-            success = pnl > 0
+            # Success criteria: trade was executed (regardless of profit/loss)
+            success = True  # If we reach this point, the trade was successfully executed
             
             # Generate notes
             strikes_info = f"Put: {ic_setup.put_long_strike}/{ic_setup.put_short_strike}, Call: {ic_setup.call_short_strike}/{ic_setup.call_long_strike}"
@@ -259,11 +259,11 @@ class SimpleBacktester:
         
         successful_trades = [r for r in results if r.success]
         failed_trades = [r for r in results if not r.success]
-        profitable_trades = [r for r in results if r.pnl > 0]
-        losing_trades = [r for r in results if r.pnl < 0]
+        profitable_trades = [r for r in successful_trades if r.pnl > 0]  # Only from successful trades
+        losing_trades = [r for r in successful_trades if r.pnl < 0]      # Only from successful trades
         
-        total_pnl = sum(r.pnl for r in results)
-        total_credits = sum(r.entry_credit for r in results if r.entry_credit > 0)
+        total_pnl = sum(r.pnl for r in successful_trades)  # Only successful trades contribute to P&L
+        total_credits = sum(r.entry_credit for r in successful_trades if r.entry_credit > 0)
         
         analysis = {
             "summary": {
@@ -274,15 +274,15 @@ class SimpleBacktester:
             },
             "trading": {
                 "total_pnl": total_pnl,
-                "avg_pnl_per_day": total_pnl / len(results) if results else 0,
+                "avg_pnl_per_day": total_pnl / len(successful_trades) if successful_trades else 0,
                 "profitable_days": len(profitable_trades),
                 "losing_days": len(losing_trades),
                 "win_rate": len(profitable_trades) / len(successful_trades) * 100 if successful_trades else 0,
                 "total_credits_collected": total_credits
             },
             "performance": {
-                "best_day": max(results, key=lambda r: r.pnl) if results else None,
-                "worst_day": min(results, key=lambda r: r.pnl) if results else None,
+                "best_day": max(successful_trades, key=lambda r: r.pnl) if successful_trades else None,
+                "worst_day": min(successful_trades, key=lambda r: r.pnl) if successful_trades else None,
                 "avg_credit": total_credits / len(successful_trades) if successful_trades else 0,
                 "avg_win": sum(r.pnl for r in profitable_trades) / len(profitable_trades) if profitable_trades else 0,
                 "avg_loss": sum(r.pnl for r in losing_trades) / len(losing_trades) if losing_trades else 0
