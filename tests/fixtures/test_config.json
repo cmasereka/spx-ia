@@ -1,0 +1,26 @@
+{
+  "TEST_DATA_DIR": "tests/fixtures/sample_data",
+  "TEST_DATES": [
+    "2026-02-09",
+    "2026-02-10",
+    "2026-02-11"
+  ],
+  "TEST_SPX_PRICES": [
+    6925.0,
+    6978.0,
+    6961.0
+  ],
+  "DEFAULT_STRATEGY_PARAMS": {
+    "target_delta": 0.15,
+    "target_prob_itm": 0.15,
+    "min_spread_width": 25,
+    "decay_threshold": 0.1,
+    "entry_time": "10:00:00",
+    "exit_time": "15:45:00"
+  },
+  "MOCK_SETTINGS": {
+    "use_mock_data": true,
+    "enable_logging": false,
+    "fast_mode": true
+  }
+}

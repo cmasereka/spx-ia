@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="5" failures="2" skipped="0" tests="11" time="0.329" timestamp="2026-02-21T03:12:46.757188-06:00" hostname="Cleaves-MacBook-Pro-2.local"><testcase classname="tests.integration.test_enhanced_backtesting.TestEnhancedBacktestingEngine" name="test_enhanced_backtest_single_day_success" time="0.005"><error message="failed on setup with &quot;IndexError: list index out of range&quot;">tests/integration/test_enhanced_backtesting.py:38: in setup_method
+    self.engine = EnhancedBacktestingEngine("tests/fixtures/test_data")
+enhanced_multi_strategy.py:31: in __init__
+    super().__init__(data_path)
+enhanced_backtest.py:258: in __init__
+    super().__init__(data_path)
+simple_backtest.py:58: in __init__
+    self.query_engine = create_fast_query_engine(data_path)
+src/data/query_engine.py:393: in create_fast_query_engine
+    loader = ParquetDataLoader(data_path)
+src/data/parquet_loader.py:31: in __init__
+    self._scan_available_data()
+src/data/parquet_loader.py:47: in _scan_available_data
+    logger.info(f"Found data for {len(self.available_dates)} dates: "
+E   IndexError: list index out of range</error></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestEnhancedBacktestingEngine" name="test_enhanced_backtest_no_data_available" time="0.004"><error message="failed on setup with &quot;IndexError: list index out of range&quot;">tests/integration/test_enhanced_backtesting.py:38: in setup_method
+    self.engine = EnhancedBacktestingEngine("tests/fixtures/test_data")
+enhanced_multi_strategy.py:31: in __init__
+    super().__init__(data_path)
+enhanced_backtest.py:258: in __init__
+    super().__init__(data_path)
+simple_backtest.py:58: in __init__
+    self.query_engine = create_fast_query_engine(data_path)
+src/data/query_engine.py:393: in create_fast_query_engine
+    loader = ParquetDataLoader(data_path)
+src/data/parquet_loader.py:31: in __init__
+    self._scan_available_data()
+src/data/parquet_loader.py:47: in _scan_available_data
+    logger.info(f"Found data for {len(self.available_dates)} dates: "
+E   IndexError: list index out of range</error></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestEnhancedBacktestingEngine" name="test_enhanced_backtest_no_spx_price" time="0.003"><error message="failed on setup with &quot;IndexError: list index out of range&quot;">tests/integration/test_enhanced_backtesting.py:38: in setup_method
+    self.engine = EnhancedBacktestingEngine("tests/fixtures/test_data")
+enhanced_multi_strategy.py:31: in __init__
+    super().__init__(data_path)
+enhanced_backtest.py:258: in __init__
+    super().__init__(data_path)
+simple_backtest.py:58: in __init__
+    self.query_engine = create_fast_query_engine(data_path)
+src/data/query_engine.py:393: in create_fast_query_engine
+    loader = ParquetDataLoader(data_path)
+src/data/parquet_loader.py:31: in __init__
+    self._scan_available_data()
+src/data/parquet_loader.py:47: in _scan_available_data
+    logger.info(f"Found data for {len(self.available_dates)} dates: "
+E   IndexError: list index out of range</error></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestEnhancedBacktestingEngine" name="test_enhanced_backtest_no_viable_strikes" time="0.003"><error message="failed on setup with &quot;IndexError: list index out of range&quot;">tests/integration/test_enhanced_backtesting.py:38: in setup_method
+    self.engine = EnhancedBacktestingEngine("tests/fixtures/test_data")
+enhanced_multi_strategy.py:31: in __init__
+    super().__init__(data_path)
+enhanced_backtest.py:258: in __init__
+    super().__init__(data_path)
+simple_backtest.py:58: in __init__
+    self.query_engine = create_fast_query_engine(data_path)
+src/data/query_engine.py:393: in create_fast_query_engine
+    loader = ParquetDataLoader(data_path)
+src/data/parquet_loader.py:31: in __init__
+    self._scan_available_data()
+src/data/parquet_loader.py:47: in _scan_available_data
+    logger.info(f"Found data for {len(self.available_dates)} dates: "
+E   IndexError: list index out of range</error></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestEnhancedBacktestingEngine" name="test_enhanced_backtest_strategy_build_failure" time="0.002"><error message="failed on setup with &quot;IndexError: list index out of range&quot;">tests/integration/test_enhanced_backtesting.py:38: in setup_method
+    self.engine = EnhancedBacktestingEngine("tests/fixtures/test_data")
+enhanced_multi_strategy.py:31: in __init__
+    super().__init__(data_path)
+enhanced_backtest.py:258: in __init__
+    super().__init__(data_path)
+simple_backtest.py:58: in __init__
+    self.query_engine = create_fast_query_engine(data_path)
+src/data/query_engine.py:393: in create_fast_query_engine
+    loader = ParquetDataLoader(data_path)
+src/data/parquet_loader.py:31: in __init__
+    self._scan_available_data()
+src/data/parquet_loader.py:47: in _scan_available_data
+    logger.info(f"Found data for {len(self.available_dates)} dates: "
+E   IndexError: list index out of range</error></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestBacktestingWorkflow" name="test_technical_analysis_to_strategy_selection" time="0.004"><failure message="AssertionError: assert &lt;StrategyType.PUT_SPREAD: 'Put Spread'&gt; in [&lt;StrategyType.IRON_CONDOR: 'Iron Condor'&gt;, &lt;StrategyType.CALL_SPREAD: 'Call Spread'&gt;]&#10; +  where &lt;StrategyType.PUT_SPREAD: 'Put Spread'&gt; = StrategySelection(strategy_type=&lt;StrategyType.PUT_SPREAD: 'Put Spread'&gt;, market_signal=&lt;MarketSignal.BEARISH: 'Bearish'&gt;, confidence=0.6666666666666666, reason='Bearish market (RSI:100.0, BB_pos:0.90)').strategy_type">tests/integration/test_enhanced_backtesting.py:198: in test_technical_analysis_to_strategy_selection
+    assert selection.strategy_type in [StrategyType.IRON_CONDOR, StrategyType.CALL_SPREAD]
+E   AssertionError: assert &lt;StrategyType.PUT_SPREAD: 'Put Spread'&gt; in [&lt;StrategyType.IRON_CONDOR: 'Iron Condor'&gt;, &lt;StrategyType.CALL_SPREAD: 'Call Spread'&gt;]
+E    +  where &lt;StrategyType.PUT_SPREAD: 'Put Spread'&gt; = StrategySelection(strategy_type=&lt;StrategyType.PUT_SPREAD: 'Put Spread'&gt;, market_signal=&lt;MarketSignal.BEARISH: 'Bearish'&gt;, confidence=0.6666666666666666, reason='Bearish market (RSI:100.0, BB_pos:0.90)').strategy_type</failure></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestBacktestingWorkflow" name="test_strategy_selection_to_strike_selection" time="0.005" /><testcase classname="tests.integration.test_enhanced_backtesting.TestBacktestingWorkflow" name="test_end_to_end_backtest_simulation" time="0.000"><failure message="NameError: name 'TechnicalAnalyzer' is not defined">tests/integration/test_enhanced_backtesting.py:238: in test_end_to_end_backtest_simulation
+    analyzer = TechnicalAnalyzer()
+E   NameError: name 'TechnicalAnalyzer' is not defined</failure></testcase><testcase classname="tests.integration.test_enhanced_backtesting.TestErrorHandlingAndRecovery" name="test_partial_data_availability" time="0.001" /><testcase classname="tests.integration.test_enhanced_backtesting.TestErrorHandlingAndRecovery" name="test_extreme_market_conditions_handling" time="0.002" /><testcase classname="tests.integration.test_enhanced_backtesting.TestErrorHandlingAndRecovery" name="test_concurrent_backtest_simulation" time="0.004" /></testsuite></testsuites>

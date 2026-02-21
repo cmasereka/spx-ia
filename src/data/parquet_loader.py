@@ -44,9 +44,12 @@ class ParquetDataLoader:
         
         self.available_dates = sorted(list(self.available_dates))
         
-        logger.info(f"Found data for {len(self.available_dates)} dates: "
-                   f"{self.available_dates[0].strftime('%Y-%m-%d')} to "
-                   f"{self.available_dates[-1].strftime('%Y-%m-%d')}")
+        logger.info(f"Found data for {len(self.available_dates)} dates")
+        if self.available_dates:
+            logger.info(f"Date range: {self.available_dates[0].strftime('%Y-%m-%d')} to "
+                       f"{self.available_dates[-1].strftime('%Y-%m-%d')}")
+        else:
+            logger.warning("No valid date files found in data directory")
         logger.info(f"SPX files: {len(self.spx_files)}, Options files: {len(self.options_files)}")
     
     @lru_cache(maxsize=32)

@@ -61,7 +61,10 @@ class SimpleBacktester:
         
         # Get available dates
         self.available_dates = [d.strftime('%Y-%m-%d') for d in self.query_engine.loader.available_dates]
-        logger.info(f"Available dates: {len(self.available_dates)} days from {self.available_dates[0]} to {self.available_dates[-1]}")
+        if self.available_dates:
+            logger.info(f"Available dates: {len(self.available_dates)} days from {self.available_dates[0]} to {self.available_dates[-1]}")
+        else:
+            logger.warning("No available dates found in data source")
     
     def backtest_single_day(self, 
                            date: str,
