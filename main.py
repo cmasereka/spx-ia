@@ -19,6 +19,7 @@ from api.models import (
 )
 from api.backtest_service import BacktestService
 from api.websocket_manager import WebSocketManager
+from api import database_routes
 
 # Global services
 backtest_service = BacktestService()
@@ -55,6 +56,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include database routes
+app.include_router(database_routes.router)
 
 @app.get("/", tags=["Health"])
 async def root():
@@ -147,10 +151,30 @@ async def cancel_backtest(backtest_id: str):
 
 @app.get("/api/v1/backtest", tags=["Backtesting"])
 async def list_backtests():
-    """List all backtests"""
+    """List all backtests (combines database and in-memory data, sorted by most recent)"""
     try:
-        backtests = backtest_service.list_backtests()
-        return {"backtests": backtests}
+        # Get in-memory backtests (includes active/running ones)
+        memory_backtests = backtest_service.list_backtests()
+        
+        # Convert to dict format for easy merging
+        result_backtests = []
+        
+        for backtest in memory_backtests:
+            result_backtests.append({
+                "backtest_id": backtest.backtest_id,
+                "mode": backtest.mode.value,
+                "status": backtest.status.value,
+                "created_at": backtest.created_at,
+                "started_at": backtest.started_at,
+                "completed_at": backtest.completed_at,
+                "total_trades": backtest.total_trades,
+                "successful_trades": backtest.successful_trades,
+                "error_message": backtest.error_message,
+                "source": "memory"  # Indicates this is from in-memory store
+            })
+        
+        return {"backtests": result_backtests}
+        
     except Exception as e:
         logger.error(f"Failed to list backtests: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -101,8 +101,11 @@ class BacktestService:
         return self.backtest_results.get(backtest_id)
     
     def list_backtests(self) -> List[BacktestStatus]:
-        """List all backtests"""
-        return list(self.backtests.values())
+        """List all backtests sorted by most recent first"""
+        backtests = list(self.backtests.values())
+        # Sort by created_at timestamp, most recent first
+        backtests.sort(key=lambda x: x.created_at, reverse=True)
+        return backtests
     
     async def cancel_backtest(self, backtest_id: str) -> bool:
         """Cancel a running backtest"""
