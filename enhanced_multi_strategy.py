@@ -89,7 +89,7 @@ class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
             else:  # CALL_SPREAD
                 strategy = self._build_call_spread_strategy(date, entry_time, strike_selection, quantity)
             
-            if not strategy or not strategy.legs:
+            if not strategy or not hasattr(strategy, 'legs') or not strategy.legs:
                 return self._create_failed_result(date, entry_time, exit_time, 
                                                f"Could not build {strategy_selection.strategy_type.value} strategy")
             
@@ -131,8 +131,8 @@ class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
                 exit_cost=final_exit_cost,
                 pnl=pnl,
                 pnl_pct=pnl_pct,
-                max_profit=strategy.max_profit if hasattr(strategy, 'max_profit') else entry_credit,
-                max_loss=strategy.max_loss if hasattr(strategy, 'max_loss') else -final_exit_cost,
+                max_profit=getattr(strategy, 'max_profit', entry_credit),
+                max_loss=getattr(strategy, 'max_loss', -final_exit_cost),
                 monitoring_points=monitoring_points,
                 success=True,
                 confidence=strategy_selection.confidence,
@@ -189,44 +189,42 @@ class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
             if len(options) < 2:
                 return None
             
-            # Create a simple strategy object (you may need to adapt this based on your strategy infrastructure)
-            from src.strategies.options_strategies import OptionsStrategy, OptionsLeg, PositionSide
+            # Create a simple strategy object using the existing IronCondor/VerticalSpread classes
+            from src.strategies.options_strategies import VerticalSpread
+            from datetime import datetime
             
             short_option = options[options['strike'] == strike_selection.short_strike].iloc[0]
             long_option = options[options['strike'] == strike_selection.long_strike].iloc[0]
             
-            # Create legs
-            short_leg = OptionsLeg(
+            # Convert options data to dictionary format expected by strategy classes
+            options_dict = {}
+            for _, row in options.iterrows():
+                key = f"{row['strike']}_{row['option_type']}"
+                options_dict[key] = {
+                    'mid_price': (row['bid'] + row['ask']) / 2,
+                    'bid': row['bid'],
+                    'ask': row['ask'],
+                    'delta': row['delta'],
+                    'gamma': row.get('gamma', 0),
+                    'theta': row.get('theta', 0),
+                    'vega': row.get('vega', 0),
+                    'iv': row.get('implied_volatility', 0)
+                }
+            
+            # Create vertical spread
+            entry_datetime = datetime.strptime(f"{date} {timestamp}", "%Y-%m-%d %H:%M:%S")
+            spx_price = self.enhanced_query_engine.get_fastest_spx_price(date, timestamp)
+            
+            strategy = VerticalSpread(
+                entry_date=entry_datetime,
+                underlying_price=spx_price,
+                short_strike=strike_selection.short_strike,
+                long_strike=strike_selection.long_strike,
                 option_type=option_type,
-                strike=strike_selection.short_strike,
-                expiration_date=date,
-                position_side=PositionSide.SHORT,
                 quantity=quantity,
-                entry_price=(short_option['bid'] + short_option['ask']) / 2,
-                current_price=(short_option['bid'] + short_option['ask']) / 2
+                expiration=entry_datetime,  # 0DTE
+                options_data=options_dict
             )
-            
-            long_leg = OptionsLeg(
-                option_type=option_type,
-                strike=strike_selection.long_strike,
-                expiration_date=date,
-                position_side=PositionSide.LONG,
-                quantity=quantity,
-                entry_price=(long_option['bid'] + long_option['ask']) / 2,
-                current_price=(long_option['bid'] + long_option['ask']) / 2
-            )
-            
-            # Create strategy
-            strategy = OptionsStrategy(
-                strategy_type=f"{option_type.upper()}_SPREAD",
-                legs=[short_leg, long_leg],
-                entry_date=date,
-                entry_time=timestamp
-            )
-            
-            # Calculate entry credit
-            entry_credit = (short_leg.entry_price - long_leg.entry_price) * quantity * 100
-            strategy.entry_credit = max(0, entry_credit)  # Ensure positive credit
             
             return strategy
             

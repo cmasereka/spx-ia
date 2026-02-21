@@ -19,6 +19,14 @@ PROCESSED_DATA_DIR = os.path.join(DATA_DIR, "processed")
 # Database Configuration
 DATABASE_PATH = os.path.join(PROCESSED_DATA_DIR, "spx_options.db")
 
+# PostgreSQL Configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://localhost:5432/spx_ai?gssencmode=disable")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_DB = os.getenv("POSTGRES_DB", "spx_ai")
+POSTGRES_USER = os.getenv("POSTGRES_USER", os.getenv("USER", "postgres"))
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
+
 # Trading Configuration
 SYMBOL = "SPX"
 DEFAULT_DTE = 0  # 0 Days to Expiration
