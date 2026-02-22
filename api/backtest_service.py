@@ -22,7 +22,7 @@ from .websocket_manager import WebSocketManager
 
 # Import existing backtesting components
 from enhanced_multi_strategy import EnhancedBacktestingEngine
-from enhanced_backtest import StrategyType, EnhancedBacktestResult
+from enhanced_backtest import StrategyType, EnhancedBacktestResult, DayBacktestResult
 
 # Import database components
 from src.database.connection import db_manager
@@ -268,23 +268,24 @@ class BacktestService:
                     backtest_id, i, total_dates, str(test_date)
                 )
                 
-                # Run single day backtest in thread pool
-                result = await loop.run_in_executor(
+                # Run single day intraday scan in thread pool
+                day_result = await loop.run_in_executor(
                     self.executor,
                     self._run_single_day_backtest,
                     test_date,
                     request
                 )
-                
-                # Convert to API result format if successful
-                if result and result.success:
-                    api_result = self._convert_result_to_api_format(result, backtest_id)
-                    results.append(api_result)
-                    
-                    # Send individual trade result
-                    await websocket_manager.send_trade_result(
-                        backtest_id, api_result.dict()
-                    )
+
+                # Convert each trade in the day result to API format
+                if day_result and day_result.trades:
+                    for trade in day_result.trades:
+                        api_result = self._convert_single_trade(trade, backtest_id)
+                        results.append(api_result)
+
+                        # Send individual trade result
+                        await websocket_manager.send_trade_result(
+                            backtest_id, api_result.dict()
+                        )
                 
                 # Small async delay
                 await asyncio.sleep(0.1)
@@ -295,24 +296,21 @@ class BacktestService:
         
         return results
     
-    def _run_single_day_backtest(self, test_date: date, request: BacktestRequest):
-        """Run a single day backtest - safe for thread pool execution"""
+    def _run_single_day_backtest(self, test_date, request: BacktestRequest) -> Optional[DayBacktestResult]:
+        """Run a single day intraday backtest — safe for thread pool execution."""
         try:
-            # Convert date object to string format expected by enhanced_backtest_single_day
             date_str = test_date.strftime('%Y-%m-%d') if hasattr(test_date, 'strftime') else str(test_date)
-            
-            return self.engine.enhanced_backtest_single_day(
+            return self.engine.backtest_day_intraday(
                 date=date_str,
                 target_delta=request.target_delta,
                 decay_threshold=request.decay_threshold,
-                entry_time=request.entry_time
             )
         except Exception as e:
             logger.error(f"Single day backtest failed for {test_date}: {e}")
             return None
     
-    def _convert_result_to_api_format(self, result: EnhancedBacktestResult, 
-                                    backtest_id: str) -> BacktestResult:
+    def _convert_single_trade(self, result: EnhancedBacktestResult,
+                              backtest_id: str) -> BacktestResult:
         """Convert engine result to API format"""
         
         # Create strategy details
@@ -346,7 +344,10 @@ class BacktestService:
             is_winner=(result.pnl or 0) > 0,
             monitoring_points=result.monitoring_points or []
         )
-    
+
+    # Backward-compatible alias
+    _convert_result_to_api_format = _convert_single_trade
+
     # Database methods
     async def _save_backtest_run_to_db(self, backtest_id: str, request: BacktestRequest, status: BacktestStatus):
         """Save backtest run to database"""

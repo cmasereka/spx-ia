@@ -8,8 +8,8 @@ from unittest.mock import Mock, patch, MagicMock
 import sys
 sys.path.append('.')
 
-from delta_strike_selector import DeltaStrikeSelector, PositionMonitor, StrikeSelection
-from enhanced_backtest import StrategyType
+from delta_strike_selector import DeltaStrikeSelector, PositionMonitor, IntradayPositionMonitor, StrikeSelection, IronCondorStrikeSelection
+from enhanced_backtest import StrategyType, IronCondorLegStatus
 from tests.conftest import (
     TestDataGenerator, MockQueryEngine, assert_valid_strike_selection, 
     SAMPLE_SPX_PRICE, SAMPLE_DATE
@@ -25,7 +25,7 @@ class TestDeltaStrikeSelector:
         self.selector = DeltaStrikeSelector(self.mock_query_engine, self.mock_ic_loader)
     
     def test_select_strikes_iron_condor_success(self):
-        """Test successful Iron Condor strike selection."""
+        """Test successful Iron Condor strike selection returns both sides."""
         strike_selection = self.selector.select_strikes_by_delta(
             date=SAMPLE_DATE,
             timestamp="10:00:00",
@@ -34,10 +34,23 @@ class TestDeltaStrikeSelector:
             target_prob_itm=0.15,
             min_spread_width=25
         )
-        
+
         if strike_selection:  # May return None if no suitable strikes
-            assert_valid_strike_selection(strike_selection, SAMPLE_SPX_PRICE)
-            assert abs(strike_selection.short_delta) <= 0.2  # Should be close to target
+            assert isinstance(strike_selection, IronCondorStrikeSelection)
+            # Put spread: short strike must be above long strike
+            assert strike_selection.put_short_strike > strike_selection.put_long_strike
+            # Call spread: short strike must be below long strike
+            assert strike_selection.call_short_strike < strike_selection.call_long_strike
+            # Spread widths must match the actual strike differences
+            assert strike_selection.put_spread_width == pytest.approx(
+                strike_selection.put_short_strike - strike_selection.put_long_strike, abs=1e-6
+            )
+            assert strike_selection.call_spread_width == pytest.approx(
+                strike_selection.call_long_strike - strike_selection.call_short_strike, abs=1e-6
+            )
+            # Deltas must be within plausible range
+            assert 0 <= strike_selection.put_short_delta <= 1
+            assert 0 <= strike_selection.call_short_delta <= 1
     
     def test_select_strikes_put_spread_success(self):
         """Test successful Put Spread strike selection."""
@@ -101,18 +114,17 @@ class TestDeltaStrikeSelector:
     
     def test_select_strikes_invalid_target_delta(self):
         """Test strike selection with invalid target delta."""
-        # Note: The actual implementation may handle invalid deltas gracefully
-        # rather than raising exceptions, so we test for that behavior
+        # The implementation handles invalid deltas gracefully rather than crashing.
+        # For IRON_CONDOR the return type is IronCondorStrikeSelection (or None).
         result = self.selector.select_strikes_by_delta(
             date=SAMPLE_DATE,
             timestamp="10:00:00",
             strategy_type=StrategyType.IRON_CONDOR,
             target_delta=1.5  # Invalid delta > 1
         )
-        
-        # The implementation might return a result anyway or None - both are acceptable
-        # We just check it doesn't crash
-        assert result is None or isinstance(result, StrikeSelection)
+
+        # Should not crash — may return a result or None
+        assert result is None or isinstance(result, (StrikeSelection, IronCondorStrikeSelection))
     
     def test_select_strikes_minimum_spread_width(self):
         """Test strike selection respects minimum spread width."""
@@ -346,3 +358,146 @@ class TestDeltaSelectorEdgeCases:
         
         # Should return None when insufficient strikes available
         assert result is None
+
+
+class TestIntradayPositionMonitor:
+    """Test IntradayPositionMonitor class."""
+
+    def setup_method(self):
+        self.mock_query_engine = Mock()
+        self.mock_strategy_builder = Mock()
+        self.mock_strategy_builder.update_strategy_prices_optimized = Mock(return_value=True)
+        self.monitor = IntradayPositionMonitor(self.mock_query_engine, self.mock_strategy_builder)
+
+    def _make_leg(self, option_type: str, entry_price: float, current_price: float, short: bool = True):
+        leg = Mock()
+        leg.option_type = Mock()
+        leg.option_type.value = option_type
+        leg.entry_price = entry_price
+        leg.current_price = current_price
+        leg.quantity = 1
+        leg.position_side = Mock()
+        leg.position_side.name = 'SHORT' if short else 'LONG'
+        return leg
+
+    def _make_ic_strategy(self, put_entry=2.0, put_current=1.5,
+                          call_entry=2.0, call_current=1.5):
+        """Create a mock IC strategy with 4 legs."""
+        strategy = Mock()
+        # Put spread: 1 short put, 1 long put
+        short_put  = self._make_leg('put',  put_entry,  put_current,  short=True)
+        long_put   = self._make_leg('put',  put_entry * 0.5, put_current * 0.5, short=False)
+        # Call spread: 1 short call, 1 long call
+        short_call = self._make_leg('call', call_entry,  call_current,  short=True)
+        long_call  = self._make_leg('call', call_entry * 0.5, call_current * 0.5, short=False)
+        strategy.legs = [short_put, long_put, short_call, long_call]
+        # entry_credit = net credit for both sides combined
+        strategy.entry_credit = (put_entry * 100 - put_entry * 0.5 * 100 +
+                                 call_entry * 100 - call_entry * 0.5 * 100)
+        return strategy
+
+    def test_check_decay_spread_exits_at_threshold(self):
+        """Spread should exit when decay_ratio <= SPREAD_DECAY_THRESHOLD."""
+        strategy = Mock()
+        strategy.entry_credit = 100.0
+        leg = self._make_leg('put', 2.0, 0.001, short=True)  # near zero cost
+        strategy.legs = [leg]
+
+        should_exit, cost, reason = self.monitor.check_decay_at_time(
+            strategy, StrategyType.PUT_SPREAD, '2026-02-10', '10:30:00'
+        )
+
+        assert should_exit is True
+        assert cost >= 0
+        assert 'decay' in reason.lower() or 'threshold' in reason.lower()
+
+    def test_check_decay_spread_no_exit_when_above_threshold(self):
+        """Spread should NOT exit when decay_ratio > threshold."""
+        strategy = Mock()
+        strategy.entry_credit = 100.0
+        leg = self._make_leg('put', 2.0, 1.0, short=True)  # 50% remaining
+        strategy.legs = [leg]
+
+        should_exit, cost, reason = self.monitor.check_decay_at_time(
+            strategy, StrategyType.PUT_SPREAD, '2026-02-10', '10:30:00'
+        )
+
+        assert should_exit is False
+
+    def test_check_ic_leg_decay_put_side_detected(self):
+        """IC put side decay should be flagged when below threshold."""
+        # Make put side nearly expired (tiny current price) but call side still alive
+        strategy = self._make_ic_strategy(
+            put_entry=2.0, put_current=0.0001,  # put fully decayed
+            call_entry=2.0, call_current=1.5     # call still has value
+        )
+        ic_status = IronCondorLegStatus()
+
+        updated = self.monitor.check_ic_leg_decay(
+            strategy, '2026-02-10', '11:00:00', ic_status
+        )
+
+        assert updated.put_side_closed is True
+        assert updated.put_side_exit_time == '11:00:00'
+        assert updated.call_side_closed is False
+
+    def test_check_ic_leg_decay_call_side_detected(self):
+        """IC call side decay should be flagged when below threshold."""
+        strategy = self._make_ic_strategy(
+            put_entry=2.0, put_current=1.5,      # put still alive
+            call_entry=2.0, call_current=0.0001  # call fully decayed
+        )
+        ic_status = IronCondorLegStatus()
+
+        updated = self.monitor.check_ic_leg_decay(
+            strategy, '2026-02-10', '12:00:00', ic_status
+        )
+
+        assert updated.call_side_closed is True
+        assert updated.call_side_exit_time == '12:00:00'
+        assert updated.put_side_closed is False
+
+    def test_check_ic_leg_decay_both_sides_independent(self):
+        """IC sides close independently at different times."""
+        strategy = self._make_ic_strategy(
+            put_entry=2.0, put_current=0.0001,
+            call_entry=2.0, call_current=0.0001
+        )
+        ic_status = IronCondorLegStatus()
+
+        self.monitor.check_ic_leg_decay(strategy, '2026-02-10', '11:00:00', ic_status)
+        assert ic_status.put_side_closed is True
+        assert ic_status.call_side_closed is True
+
+    def test_check_ic_leg_decay_does_not_reclose_already_closed(self):
+        """Already-closed IC side should not update exit time on subsequent checks."""
+        strategy = self._make_ic_strategy(
+            put_entry=2.0, put_current=0.0001,
+            call_entry=2.0, call_current=0.0001
+        )
+        ic_status = IronCondorLegStatus()
+
+        self.monitor.check_ic_leg_decay(strategy, '2026-02-10', '11:00:00', ic_status)
+        first_put_exit = ic_status.put_side_exit_time
+
+        # Call again at a later time — should NOT update exit times
+        self.monitor.check_ic_leg_decay(strategy, '2026-02-10', '12:00:00', ic_status)
+        assert ic_status.put_side_exit_time == first_put_exit
+
+    def test_calculate_exit_cost_zero_entry_credit(self):
+        """Exit cost calculation handles zero entry_credit gracefully."""
+        strategy = Mock()
+        strategy.entry_credit = 0
+        strategy.legs = []
+
+        should_exit, cost, reason = self.monitor.check_decay_at_time(
+            strategy, StrategyType.PUT_SPREAD, '2026-02-10', '10:00:00'
+        )
+
+        assert should_exit is False
+        assert cost >= 0
+
+    def test_ic_decay_thresholds_are_correct(self):
+        """Verify class-level decay threshold constants."""
+        assert IntradayPositionMonitor.IC_DECAY_THRESHOLD == 0.05
+        assert IntradayPositionMonitor.SPREAD_DECAY_THRESHOLD == 0.05

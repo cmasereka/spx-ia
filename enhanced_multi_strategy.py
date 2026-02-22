@@ -18,10 +18,24 @@ import argparse
 from enhanced_backtest import (
     StrategyType, MarketSignal, TechnicalIndicators, StrategySelection,
     EnhancedBacktestResult, TechnicalAnalyzer, StrategySelector,
-    EnhancedMultiStrategyBacktester
+    EnhancedMultiStrategyBacktester, IronCondorLegStatus, DayBacktestResult
 )
-from delta_strike_selector import DeltaStrikeSelector, PositionMonitor, StrikeSelection
+from delta_strike_selector import DeltaStrikeSelector, PositionMonitor, IntradayPositionMonitor, StrikeSelection, IronCondorStrikeSelection
 from query_engine_adapter import EnhancedQueryEngineAdapter
+
+
+# Intraday scan constants
+ENTRY_SCAN_START = "09:35:00"   # 9:30 + first 5-min bar
+LAST_ENTRY_TIME  = "15:00:00"   # No new entries at or after 3 PM
+FINAL_EXIT_TIME  = "15:45:00"   # Hard close all positions
+
+
+def _build_minute_grid(date: str, start_time: str, end_time: str) -> List[str]:
+    """Generate all HH:MM:SS strings for 1-min bars between start and end (inclusive)."""
+    start_dt = pd.Timestamp(f"{date} {start_time}")
+    end_dt   = pd.Timestamp(f"{date} {end_time}")
+    times = pd.date_range(start=start_dt, end=end_dt, freq='1min')
+    return [t.strftime("%H:%M:%S") for t in times]
 
 
 class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
@@ -33,7 +47,321 @@ class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
         self.enhanced_query_engine = EnhancedQueryEngineAdapter(self.query_engine)
         self.delta_selector = DeltaStrikeSelector(self.enhanced_query_engine, self.ic_loader)
         self.position_monitor = PositionMonitor(self.enhanced_query_engine, self.strategy_builder)
-    
+        self.intraday_monitor = IntradayPositionMonitor(self.enhanced_query_engine, self.strategy_builder)
+
+    # ------------------------------------------------------------------
+    # Intraday multi-trade scan loop
+    # ------------------------------------------------------------------
+
+    def backtest_day_intraday(self,
+                              date: str,
+                              target_delta: float = 0.15,
+                              target_prob_itm: float = 0.15,
+                              min_spread_width: int = 25,
+                              decay_threshold: float = 0.05,
+                              quantity: int = 1) -> DayBacktestResult:
+        """
+        Full intraday scan loop for one trading day.
+        Scans every 1-min bar from 09:35 onward.
+        Returns DayBacktestResult containing all trades executed that day.
+        """
+        logger.info(f"Intraday scan: {date} | delta={target_delta} decay={decay_threshold}")
+
+        scan_times = _build_minute_grid(date, ENTRY_SCAN_START, "15:59:00")
+        trades: List[EnhancedBacktestResult] = []
+
+        if date not in self.available_dates:
+            return DayBacktestResult(date=date, trades=[], total_pnl=0.0,
+                                     trade_count=0, scan_minutes_checked=0)
+
+        # Open position slots
+        open_put_spread  = None   # strategy object or None
+        open_call_spread = None
+        open_ic          = None   # strategy object or None
+        ic_leg_status    = None   # IronCondorLegStatus or None
+        ic_entry_meta    = {}     # metadata for building the final IC result
+        put_spread_meta  = {}
+        call_spread_meta = {}
+
+        for current_time in scan_times:
+            is_past_entry_cutoff = current_time >= LAST_ENTRY_TIME
+            is_past_final_exit   = current_time >= FINAL_EXIT_TIME
+
+            # --- 1. Monitor IC legs independently ---
+            if open_ic is not None and ic_leg_status is not None:
+                ic_leg_status = self.intraday_monitor.check_ic_leg_decay(
+                    open_ic, date, current_time, ic_leg_status
+                )
+                # If both sides closed → finalize IC trade
+                if ic_leg_status.put_side_closed and ic_leg_status.call_side_closed:
+                    total_exit_cost = ic_leg_status.put_side_exit_cost + ic_leg_status.call_side_exit_cost
+                    entry_credit = getattr(open_ic, 'entry_credit', 0)
+                    pnl = entry_credit - total_exit_cost
+                    pnl_pct = (pnl / entry_credit * 100) if entry_credit > 0 else 0
+                    exit_spx = self.enhanced_query_engine.get_fastest_spx_price(date, current_time) or ic_entry_meta.get('entry_spx', 0)
+                    later_side_time = max(
+                        ic_leg_status.put_side_exit_time or "00:00:00",
+                        ic_leg_status.call_side_exit_time or "00:00:00"
+                    )
+                    trades.append(EnhancedBacktestResult(
+                        date=date,
+                        strategy_type=StrategyType.IRON_CONDOR,
+                        market_signal=ic_entry_meta.get('market_signal', MarketSignal.NEUTRAL),
+                        entry_time=ic_entry_meta.get('entry_time', current_time),
+                        exit_time=later_side_time,
+                        exit_reason="IC both sides decayed",
+                        entry_spx_price=ic_entry_meta.get('entry_spx', 0),
+                        exit_spx_price=exit_spx,
+                        technical_indicators=ic_entry_meta.get('indicators', TechnicalIndicators(0,0,0,0,0,0,0,0.5)),
+                        strike_selection=ic_entry_meta.get('strike_selection', StrikeSelection(0,0,0,0,0)),
+                        entry_credit=entry_credit,
+                        exit_cost=total_exit_cost,
+                        pnl=pnl,
+                        pnl_pct=pnl_pct,
+                        max_profit=getattr(open_ic, 'max_profit', entry_credit),
+                        max_loss=getattr(open_ic, 'max_loss', -total_exit_cost),
+                        monitoring_points=[],
+                        success=True,
+                        confidence=ic_entry_meta.get('confidence', 0),
+                        notes=ic_entry_meta.get('notes', ''),
+                        ic_leg_status=ic_leg_status
+                    ))
+                    open_ic = None
+                    ic_leg_status = None
+                    ic_entry_meta = {}
+
+            # --- 2. Monitor put spread decay ---
+            if open_put_spread is not None:
+                should_exit, current_cost, reason = self.intraday_monitor.check_decay_at_time(
+                    open_put_spread, StrategyType.PUT_SPREAD, date, current_time
+                )
+                if should_exit or is_past_final_exit:
+                    exit_reason = reason if should_exit else "Force close at expiration"
+                    entry_credit = getattr(open_put_spread, 'entry_credit', 0)
+                    pnl = entry_credit - current_cost
+                    pnl_pct = (pnl / entry_credit * 100) if entry_credit > 0 else 0
+                    exit_spx = self.enhanced_query_engine.get_fastest_spx_price(date, current_time) or put_spread_meta.get('entry_spx', 0)
+                    trades.append(EnhancedBacktestResult(
+                        date=date,
+                        strategy_type=StrategyType.PUT_SPREAD,
+                        market_signal=put_spread_meta.get('market_signal', MarketSignal.BULLISH),
+                        entry_time=put_spread_meta.get('entry_time', current_time),
+                        exit_time=current_time,
+                        exit_reason=exit_reason,
+                        entry_spx_price=put_spread_meta.get('entry_spx', 0),
+                        exit_spx_price=exit_spx,
+                        technical_indicators=put_spread_meta.get('indicators', TechnicalIndicators(0,0,0,0,0,0,0,0.5)),
+                        strike_selection=put_spread_meta.get('strike_selection', StrikeSelection(0,0,0,0,0)),
+                        entry_credit=entry_credit,
+                        exit_cost=current_cost,
+                        pnl=pnl,
+                        pnl_pct=pnl_pct,
+                        max_profit=getattr(open_put_spread, 'max_profit', entry_credit),
+                        max_loss=getattr(open_put_spread, 'max_loss', -current_cost),
+                        monitoring_points=[],
+                        success=True,
+                        confidence=put_spread_meta.get('confidence', 0),
+                        notes=put_spread_meta.get('notes', '')
+                    ))
+                    open_put_spread = None
+                    put_spread_meta = {}
+
+            # --- 3. Monitor call spread decay ---
+            if open_call_spread is not None:
+                should_exit, current_cost, reason = self.intraday_monitor.check_decay_at_time(
+                    open_call_spread, StrategyType.CALL_SPREAD, date, current_time
+                )
+                if should_exit or is_past_final_exit:
+                    exit_reason = reason if should_exit else "Force close at expiration"
+                    entry_credit = getattr(open_call_spread, 'entry_credit', 0)
+                    pnl = entry_credit - current_cost
+                    pnl_pct = (pnl / entry_credit * 100) if entry_credit > 0 else 0
+                    exit_spx = self.enhanced_query_engine.get_fastest_spx_price(date, current_time) or call_spread_meta.get('entry_spx', 0)
+                    trades.append(EnhancedBacktestResult(
+                        date=date,
+                        strategy_type=StrategyType.CALL_SPREAD,
+                        market_signal=call_spread_meta.get('market_signal', MarketSignal.BEARISH),
+                        entry_time=call_spread_meta.get('entry_time', current_time),
+                        exit_time=current_time,
+                        exit_reason=exit_reason,
+                        entry_spx_price=call_spread_meta.get('entry_spx', 0),
+                        exit_spx_price=exit_spx,
+                        technical_indicators=call_spread_meta.get('indicators', TechnicalIndicators(0,0,0,0,0,0,0,0.5)),
+                        strike_selection=call_spread_meta.get('strike_selection', StrikeSelection(0,0,0,0,0)),
+                        entry_credit=entry_credit,
+                        exit_cost=current_cost,
+                        pnl=pnl,
+                        pnl_pct=pnl_pct,
+                        max_profit=getattr(open_call_spread, 'max_profit', entry_credit),
+                        max_loss=getattr(open_call_spread, 'max_loss', -current_cost),
+                        monitoring_points=[],
+                        success=True,
+                        confidence=call_spread_meta.get('confidence', 0),
+                        notes=call_spread_meta.get('notes', '')
+                    ))
+                    open_call_spread = None
+                    call_spread_meta = {}
+
+            # --- 4. Scan for new entry (only before 3 PM and before final exit) ---
+            if not is_past_entry_cutoff and not is_past_final_exit:
+                try:
+                    spx_history = self.get_spx_price_history(date, current_time, lookback_minutes=60)
+                    indicators = self.technical_analyzer.analyze_market_conditions(spx_history)
+                    selection = self.strategy_selector.select_strategy(indicators)
+                    entry_spx = self.enhanced_query_engine.get_fastest_spx_price(date, current_time) or 0
+
+                    if selection.strategy_type == StrategyType.IRON_CONDOR:
+                        if open_ic is None and open_put_spread is None and open_call_spread is None:
+                            strategy = self._try_open_strategy(
+                                date, current_time, StrategyType.IRON_CONDOR,
+                                target_delta, target_prob_itm, min_spread_width, quantity
+                            )
+                            if strategy:
+                                open_ic = strategy
+                                ic_leg_status = IronCondorLegStatus()
+                                ic_entry_meta = {
+                                    'entry_time': current_time,
+                                    'entry_spx': entry_spx,
+                                    'indicators': indicators,
+                                    'strike_selection': self._last_strike_selection or StrikeSelection(0,0,0,0,0),
+                                    'market_signal': selection.market_signal,
+                                    'confidence': selection.confidence,
+                                    'notes': selection.reason
+                                }
+                                logger.info(f"Opened IC at {current_time}")
+
+                    elif selection.strategy_type == StrategyType.PUT_SPREAD:
+                        if open_put_spread is None and open_ic is None:
+                            strategy = self._try_open_strategy(
+                                date, current_time, StrategyType.PUT_SPREAD,
+                                target_delta, target_prob_itm, min_spread_width, quantity
+                            )
+                            if strategy:
+                                open_put_spread = strategy
+                                put_spread_meta = {
+                                    'entry_time': current_time,
+                                    'entry_spx': entry_spx,
+                                    'indicators': indicators,
+                                    'strike_selection': self._last_strike_selection or StrikeSelection(0,0,0,0,0),
+                                    'market_signal': selection.market_signal,
+                                    'confidence': selection.confidence,
+                                    'notes': selection.reason
+                                }
+                                logger.info(f"Opened put spread at {current_time}")
+
+                    elif selection.strategy_type == StrategyType.CALL_SPREAD:
+                        if open_call_spread is None and open_ic is None:
+                            strategy = self._try_open_strategy(
+                                date, current_time, StrategyType.CALL_SPREAD,
+                                target_delta, target_prob_itm, min_spread_width, quantity
+                            )
+                            if strategy:
+                                open_call_spread = strategy
+                                call_spread_meta = {
+                                    'entry_time': current_time,
+                                    'entry_spx': entry_spx,
+                                    'indicators': indicators,
+                                    'strike_selection': self._last_strike_selection or StrikeSelection(0,0,0,0,0),
+                                    'market_signal': selection.market_signal,
+                                    'confidence': selection.confidence,
+                                    'notes': selection.reason
+                                }
+                                logger.info(f"Opened call spread at {current_time}")
+
+                except Exception as e:
+                    logger.debug(f"Entry scan error at {current_time}: {e}")
+                    continue
+
+        # --- 5. Force-close remaining positions at FINAL_EXIT_TIME ---
+        for (open_pos, meta, stype) in [
+            (open_ic,          ic_entry_meta,    StrategyType.IRON_CONDOR),
+            (open_put_spread,  put_spread_meta,  StrategyType.PUT_SPREAD),
+            (open_call_spread, call_spread_meta, StrategyType.CALL_SPREAD),
+        ]:
+            if open_pos is not None:
+                try:
+                    self.strategy_builder.update_strategy_prices_optimized(open_pos, date, FINAL_EXIT_TIME)
+                except Exception:
+                    pass
+                exit_cost = self.intraday_monitor._calculate_exit_cost(open_pos)
+                entry_credit = getattr(open_pos, 'entry_credit', 0)
+                pnl = entry_credit - exit_cost
+                pnl_pct = (pnl / entry_credit * 100) if entry_credit > 0 else 0
+                exit_spx = self.enhanced_query_engine.get_fastest_spx_price(date, FINAL_EXIT_TIME) or meta.get('entry_spx', 0)
+
+                result_ic_leg_status = None
+                if stype == StrategyType.IRON_CONDOR and ic_leg_status is not None:
+                    # Mark any open IC side as force-closed
+                    if not ic_leg_status.put_side_closed:
+                        ic_leg_status.put_side_closed = True
+                        ic_leg_status.put_side_exit_time = FINAL_EXIT_TIME
+                        ic_leg_status.put_side_exit_reason = "Force close at expiration"
+                    if not ic_leg_status.call_side_closed:
+                        ic_leg_status.call_side_closed = True
+                        ic_leg_status.call_side_exit_time = FINAL_EXIT_TIME
+                        ic_leg_status.call_side_exit_reason = "Force close at expiration"
+                    result_ic_leg_status = ic_leg_status
+
+                trades.append(EnhancedBacktestResult(
+                    date=date,
+                    strategy_type=stype,
+                    market_signal=meta.get('market_signal', MarketSignal.NEUTRAL),
+                    entry_time=meta.get('entry_time', FINAL_EXIT_TIME),
+                    exit_time=FINAL_EXIT_TIME,
+                    exit_reason="Force close at expiration",
+                    entry_spx_price=meta.get('entry_spx', 0),
+                    exit_spx_price=exit_spx,
+                    technical_indicators=meta.get('indicators', TechnicalIndicators(0,0,0,0,0,0,0,0.5)),
+                    strike_selection=meta.get('strike_selection', StrikeSelection(0,0,0,0,0)),
+                    entry_credit=entry_credit,
+                    exit_cost=exit_cost,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    max_profit=getattr(open_pos, 'max_profit', entry_credit),
+                    max_loss=getattr(open_pos, 'max_loss', -exit_cost),
+                    monitoring_points=[],
+                    success=True,
+                    confidence=meta.get('confidence', 0),
+                    notes=meta.get('notes', ''),
+                    ic_leg_status=result_ic_leg_status
+                ))
+
+        return DayBacktestResult(
+            date=date,
+            trades=trades,
+            total_pnl=sum(t.pnl for t in trades),
+            trade_count=len(trades),
+            scan_minutes_checked=len(scan_times)
+        )
+
+    def _try_open_strategy(self, date: str, timestamp: str, strategy_type: StrategyType,
+                           target_delta: float, target_prob_itm: float,
+                           min_spread_width: int, quantity: int):
+        """Attempt to build a strategy at the given timestamp. Returns strategy or None."""
+        self._last_strike_selection = None
+        try:
+            strike_selection = self.delta_selector.select_strikes_by_delta(
+                date=date,
+                timestamp=timestamp,
+                strategy_type=strategy_type,
+                target_delta=target_delta,
+                target_prob_itm=target_prob_itm,
+                min_spread_width=min_spread_width
+            )
+            if not strike_selection:
+                return None
+            self._last_strike_selection = strike_selection
+
+            if strategy_type == StrategyType.IRON_CONDOR:
+                return self._build_iron_condor_strategy(date, timestamp, strike_selection, quantity)
+            elif strategy_type == StrategyType.PUT_SPREAD:
+                return self._build_put_spread_strategy(date, timestamp, strike_selection, quantity)
+            else:
+                return self._build_call_spread_strategy(date, timestamp, strike_selection, quantity)
+        except Exception as e:
+            logger.debug(f"Failed to open {strategy_type.value} at {timestamp}: {e}")
+            return None
+
     def enhanced_backtest_single_day(self,
                                    date: str,
                                    entry_time: str = "10:00:00",
@@ -41,115 +369,38 @@ class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
                                    target_delta: float = 0.15,
                                    target_prob_itm: float = 0.15,
                                    min_spread_width: int = 25,
-                                   decay_threshold: float = 0.1,
+                                   decay_threshold: float = 0.05,
                                    quantity: int = 1) -> EnhancedBacktestResult:
-        """
-        Run enhanced backtest with technical analysis and dynamic monitoring
-        """
-        
-        logger.info(f"Enhanced backtesting {date} - Target Delta: {target_delta}, Decay: {decay_threshold}")
-        
-        # Validate date
-        if date not in self.available_dates:
-            return self._create_failed_result(date, entry_time, exit_time, "No data available")
-        
-        try:
-            # Step 1: Get SPX price and history
-            entry_spx_price = self.enhanced_query_engine.get_fastest_spx_price(date, entry_time)
-            if not entry_spx_price:
-                return self._create_failed_result(date, entry_time, exit_time, "No SPX price at entry")
-            
-            spx_history = self.get_spx_price_history(date, entry_time, lookback_minutes=60)
-            
-            # Step 2: Technical analysis
-            technical_indicators = self.technical_analyzer.analyze_market_conditions(spx_history)
-            strategy_selection = self.strategy_selector.select_strategy(technical_indicators)
-            
-            logger.info(f"Strategy selected: {strategy_selection.strategy_type.value} - {strategy_selection.reason}")
-            
-            # Step 3: Delta-based strike selection
-            strike_selection = self.delta_selector.select_strikes_by_delta(
-                date=date,
-                timestamp=entry_time,
-                strategy_type=strategy_selection.strategy_type,
-                target_delta=target_delta,
-                target_prob_itm=target_prob_itm,
-                min_spread_width=min_spread_width
-            )
-            
-            if not strike_selection:
-                return self._create_failed_result(date, entry_time, exit_time, 
-                                               f"No viable {strategy_selection.strategy_type.value} strikes found")
-            
-            # Step 4: Build strategy
-            if strategy_selection.strategy_type == StrategyType.IRON_CONDOR:
-                strategy = self._build_iron_condor_strategy(date, entry_time, strike_selection, quantity)
-            elif strategy_selection.strategy_type == StrategyType.PUT_SPREAD:
-                strategy = self._build_put_spread_strategy(date, entry_time, strike_selection, quantity)
-            else:  # CALL_SPREAD
-                strategy = self._build_call_spread_strategy(date, entry_time, strike_selection, quantity)
-            
-            if not strategy or not hasattr(strategy, 'legs') or not strategy.legs:
-                return self._create_failed_result(date, entry_time, exit_time, 
-                                               f"Could not build {strategy_selection.strategy_type.value} strategy")
-            
-            # Step 5: Position monitoring with 5-minute intervals
-            monitoring_points, exit_reason, final_exit_cost = self.position_monitor.monitor_position(
-                strategy=strategy,
-                date=date,
-                entry_time=entry_time,
-                exit_time=exit_time,
-                strategy_type=strategy_selection.strategy_type,
-                decay_threshold=decay_threshold
-            )
-            
-            # Step 6: Final P&L calculation
-            entry_credit = strategy.entry_credit
-            pnl = entry_credit - final_exit_cost
-            pnl_pct = (pnl / entry_credit * 100) if entry_credit > 0 else 0
-            
-            # Get final SPX price
-            exit_spx_price = self.enhanced_query_engine.get_fastest_spx_price(date, exit_time) or entry_spx_price
-            
-            # Extract final exit time from monitoring
-            actual_exit_time = exit_time
-            if monitoring_points and exit_reason != "Held to expiration":
-                actual_exit_time = monitoring_points[-1]['timestamp']
-            
-            return EnhancedBacktestResult(
-                date=date,
-                strategy_type=strategy_selection.strategy_type,
-                market_signal=strategy_selection.market_signal,
-                entry_time=entry_time,
-                exit_time=actual_exit_time,
-                exit_reason=exit_reason,
-                entry_spx_price=entry_spx_price,
-                exit_spx_price=exit_spx_price,
-                technical_indicators=technical_indicators,
-                strike_selection=strike_selection,
-                entry_credit=entry_credit,
-                exit_cost=final_exit_cost,
-                pnl=pnl,
-                pnl_pct=pnl_pct,
-                max_profit=getattr(strategy, 'max_profit', entry_credit),
-                max_loss=getattr(strategy, 'max_loss', -final_exit_cost),
-                monitoring_points=monitoring_points,
-                success=True,
-                confidence=strategy_selection.confidence,
-                notes=f"{strategy_selection.reason} | Delta: {strike_selection.short_delta:.3f}"
-            )
-            
-        except Exception as e:
-            logger.error(f"Enhanced backtest failed for {date}: {e}")
-            return self._create_failed_result(date, entry_time, exit_time, f"Error: {str(e)}")
-    
-    def _build_iron_condor_strategy(self, date: str, timestamp: str, strike_selection: StrikeSelection, quantity: int):
-        """Build Iron Condor using existing infrastructure"""
-        # Use existing Iron Condor builder with put strikes from delta selection
-        put_distance = abs(strike_selection.short_strike - self.enhanced_query_engine.get_fastest_spx_price(date, timestamp))
-        call_distance = put_distance  # Symmetric
-        spread_width = int(strike_selection.spread_width)
-        
+        """Legacy single-day method — runs intraday scan and returns first trade result."""
+        day_result = self.backtest_day_intraday(
+            date=date,
+            target_delta=target_delta,
+            target_prob_itm=target_prob_itm,
+            min_spread_width=min_spread_width,
+            decay_threshold=decay_threshold,
+            quantity=quantity
+        )
+        if day_result.trades:
+            return day_result.trades[0]
+        return self._create_failed_result(date, entry_time, FINAL_EXIT_TIME, "No setup found intraday")
+
+    def _build_iron_condor_strategy(self, date: str, timestamp: str, strike_selection, quantity: int):
+        """Build Iron Condor using independently delta-selected put and call strikes."""
+        spx_price = self.enhanced_query_engine.get_fastest_spx_price(date, timestamp)
+        if not spx_price:
+            return None
+
+        if isinstance(strike_selection, IronCondorStrikeSelection):
+            put_distance = abs(strike_selection.put_short_strike - spx_price)
+            call_distance = abs(strike_selection.call_short_strike - spx_price)
+            # Use the larger of the two spread widths for the builder call
+            spread_width = int(max(strike_selection.put_spread_width, strike_selection.call_spread_width))
+        else:
+            # Fallback: symmetric IC from a single-side StrikeSelection
+            put_distance = abs(strike_selection.short_strike - spx_price)
+            call_distance = put_distance
+            spread_width = int(strike_selection.spread_width)
+
         return self.strategy_builder.build_iron_condor_optimized(
             date=date,
             timestamp=timestamp,
@@ -356,74 +607,69 @@ class EnhancedBacktestingEngine(EnhancedMultiStrategyBacktester):
 
 def run_enhanced_backtest():
     """Run enhanced backtesting with command line interface"""
-    
+
     parser = argparse.ArgumentParser(description="Enhanced Multi-Strategy SPX 0DTE Backtester")
     parser.add_argument("--date", "-d", help="Date to backtest (YYYY-MM-DD)")
     parser.add_argument("--start-date", help="Start date for range (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date for range (YYYY-MM-DD)")
     parser.add_argument("--target-delta", type=float, default=0.15, help="Target delta for short strikes")
     parser.add_argument("--target-prob-itm", type=float, default=0.15, help="Target probability ITM")
-    parser.add_argument("--decay-threshold", type=float, default=0.1, help="Decay threshold for exits")
+    parser.add_argument("--decay-threshold", type=float, default=0.05, help="Decay threshold for exits")
     parser.add_argument("--min-spread-width", type=int, default=25, help="Minimum spread width")
     parser.add_argument("--show-monitoring", action="store_true", help="Show detailed monitoring")
-    
+
     args = parser.parse_args()
-    
+
     # Initialize enhanced engine
     engine = EnhancedBacktestingEngine()
-    
+
     if args.date:
-        # Single day backtest
-        result = engine.enhanced_backtest_single_day(
+        # Single day intraday scan
+        day_result = engine.backtest_day_intraday(
             date=args.date,
             target_delta=args.target_delta,
             target_prob_itm=args.target_prob_itm,
             decay_threshold=args.decay_threshold,
             min_spread_width=args.min_spread_width
         )
-        engine.print_enhanced_results([result], show_monitoring=args.show_monitoring)
-        
+        print(f"\nDate: {day_result.date} | Trades: {day_result.trade_count} | Total P&L: ${day_result.total_pnl:.2f} | Bars scanned: {day_result.scan_minutes_checked}")
+        if day_result.trades:
+            engine.print_enhanced_results(day_result.trades, show_monitoring=args.show_monitoring)
+
     elif args.start_date and args.end_date:
-        # Date range backtest
-        results = []
-        
-        # Generate date range
+        # Date range intraday scan
+        all_trades: List[EnhancedBacktestResult] = []
+
         start_dt = pd.to_datetime(args.start_date)
         end_dt = pd.to_datetime(args.end_date)
         date_range = pd.date_range(start_dt, end_dt, freq='D')
-        
-        # Filter to available dates
-        test_dates = []
-        for date in date_range:
-            date_str = date.strftime('%Y-%m-%d')
-            if date_str in engine.available_dates:
-                test_dates.append(date_str)
-        
-        logger.info(f"Testing {len(test_dates)} available days in enhanced mode")
-        
-        # Run enhanced backtests
+
+        test_dates = [d.strftime('%Y-%m-%d') for d in date_range if d.strftime('%Y-%m-%d') in engine.available_dates]
+        logger.info(f"Testing {len(test_dates)} available days in intraday mode")
+
         for i, date in enumerate(test_dates, 1):
-            logger.info(f"Enhanced testing {i}/{len(test_dates)}: {date}")
-            result = engine.enhanced_backtest_single_day(
+            logger.info(f"Intraday scan {i}/{len(test_dates)}: {date}")
+            day_result = engine.backtest_day_intraday(
                 date=date,
                 target_delta=args.target_delta,
                 target_prob_itm=args.target_prob_itm,
                 decay_threshold=args.decay_threshold,
                 min_spread_width=args.min_spread_width
             )
-            results.append(result)
-        
-        engine.print_enhanced_results(results, show_monitoring=args.show_monitoring)
-    
+            all_trades.extend(day_result.trades)
+            logger.info(f"  {date}: {day_result.trade_count} trades, P&L=${day_result.total_pnl:.2f}")
+
+        engine.print_enhanced_results(all_trades, show_monitoring=args.show_monitoring)
+
     else:
-        print("Enhanced SPX 0DTE Multi-Strategy Backtester")
+        print("Enhanced SPX 0DTE Multi-Strategy Backtester (Intraday Mode)")
         print("Available commands:")
-        print("  --date YYYY-MM-DD                           # Single day enhanced backtest")
-        print("  --start-date YYYY-MM-DD --end-date YYYY-MM-DD  # Enhanced date range")
-        print("  --target-delta 0.15                        # Target delta for strikes")
-        print("  --decay-threshold 0.1                      # Exit when position decays to 10%")
-        print("  --show-monitoring                           # Show 5-min monitoring details")
-        print("\\nExample:")
+        print("  --date YYYY-MM-DD                               # Single day intraday scan")
+        print("  --start-date YYYY-MM-DD --end-date YYYY-MM-DD  # Date range intraday scan")
+        print("  --target-delta 0.15                            # Target delta for strikes")
+        print("  --decay-threshold 0.05                         # Exit when position decays to 5%")
+        print("  --show-monitoring                              # Show detailed monitoring")
+        print("\nExample:")
         print("  python enhanced_multi_strategy.py --date 2026-02-09 --target-delta 0.20")
         print("  python enhanced_multi_strategy.py --start-date 2026-02-09 --end-date 2026-02-13 --show-monitoring")
 

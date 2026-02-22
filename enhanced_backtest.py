@@ -81,17 +81,17 @@ class EnhancedBacktestResult:
     entry_time: str
     exit_time: str
     exit_reason: str
-    
+
     # SPX movement
     entry_spx_price: float
     exit_spx_price: float
-    
+
     # Technical indicators
     technical_indicators: TechnicalIndicators
-    
+
     # Strike details
     strike_selection: StrikeSelection
-    
+
     # P&L details
     entry_credit: float
     exit_cost: float
@@ -99,12 +99,38 @@ class EnhancedBacktestResult:
     pnl_pct: float
     max_profit: float
     max_loss: float
-    
+
     # Monitoring
     monitoring_points: List[Dict[str, Any]]  # 5-min intervals
     success: bool
     confidence: float
     notes: str
+
+    # IC independent leg tracking (only populated for IC trades)
+    ic_leg_status: Optional['IronCondorLegStatus'] = None
+
+
+@dataclass
+class IronCondorLegStatus:
+    """Tracks independent close status of each IC side."""
+    put_side_closed: bool = False
+    call_side_closed: bool = False
+    put_side_exit_time: Optional[str] = None
+    call_side_exit_time: Optional[str] = None
+    put_side_exit_cost: float = 0.0
+    call_side_exit_cost: float = 0.0
+    put_side_exit_reason: str = ""
+    call_side_exit_reason: str = ""
+
+
+@dataclass
+class DayBacktestResult:
+    """All trades executed on a single day."""
+    date: str
+    trades: List[EnhancedBacktestResult]   # 0..N trades per day
+    total_pnl: float
+    trade_count: int
+    scan_minutes_checked: int              # How many 1-min bars were scanned
 
 
 class TechnicalAnalyzer:
@@ -188,16 +214,22 @@ class TechnicalAnalyzer:
 
 
 class StrategySelector:
-    """Select optimal strategy based on technical indicators"""
-    
+    """Select optimal strategy based on technical indicators.
+
+    All strategies are credit spreads — we always sell premium:
+      - Neutral market  → Iron Condor (sell both sides)
+      - Bullish market  → Put Credit Spread  (sell OTM put spread; profits if market stays up)
+      - Bearish market  → Call Credit Spread (sell OTM call spread; profits if market stays down)
+    """
+
     def select_strategy(self, indicators: TechnicalIndicators) -> StrategySelection:
         """Select strategy based on technical analysis"""
-        
+
         # Analyze market conditions
         bullish_signals = 0
         bearish_signals = 0
         neutral_signals = 0
-        
+
         # RSI analysis
         if indicators.rsi > 70:
             bearish_signals += 1
@@ -205,7 +237,7 @@ class StrategySelector:
             bullish_signals += 1
         elif 40 <= indicators.rsi <= 60:
             neutral_signals += 1
-        
+
         # MACD analysis
         if indicators.macd_histogram > 0 and indicators.macd_line > indicators.macd_signal:
             bullish_signals += 1
@@ -213,36 +245,35 @@ class StrategySelector:
             bearish_signals += 1
         else:
             neutral_signals += 1
-            
+
         # Bollinger Bands analysis
-        if indicators.bb_position > 0.8:  # Near upper band
+        if indicators.bb_position > 0.8:  # Near upper band — overbought
             bearish_signals += 1
-        elif indicators.bb_position < 0.2:  # Near lower band
+        elif indicators.bb_position < 0.2:  # Near lower band — oversold
             bullish_signals += 1
         elif 0.3 <= indicators.bb_position <= 0.7:  # Middle range
             neutral_signals += 1
-        
-        # Determine dominant signal
-        total_signals = bullish_signals + bearish_signals + neutral_signals
-        
-        if neutral_signals >= 2:  # At least 2 neutral signals
+
+        if neutral_signals >= 2:  # At least 2 neutral signals → range-bound
             market_signal = MarketSignal.NEUTRAL
             strategy_type = StrategyType.IRON_CONDOR
             confidence = neutral_signals / 3
-            reason = f"Neutral market (RSI:{indicators.rsi:.1f}, BB_pos:{indicators.bb_position:.2f})"
-            
+            reason = f"Neutral market (RSI:{indicators.rsi:.1f}, BB_pos:{indicators.bb_position:.2f}) → Iron Condor"
+
         elif bullish_signals > bearish_signals:
-            market_signal = MarketSignal.BULLISH  
-            strategy_type = StrategyType.CALL_SPREAD
-            confidence = bullish_signals / 3
-            reason = f"Bullish market (RSI:{indicators.rsi:.1f}, MACD_hist:{indicators.macd_histogram:.3f})"
-            
-        else:
-            market_signal = MarketSignal.BEARISH
+            # Bullish bias: sell a put credit spread (collect premium below the market)
+            market_signal = MarketSignal.BULLISH
             strategy_type = StrategyType.PUT_SPREAD
+            confidence = bullish_signals / 3
+            reason = f"Bullish market (RSI:{indicators.rsi:.1f}, MACD_hist:{indicators.macd_histogram:.3f}) → Put Credit Spread"
+
+        else:
+            # Bearish bias: sell a call credit spread (collect premium above the market)
+            market_signal = MarketSignal.BEARISH
+            strategy_type = StrategyType.CALL_SPREAD
             confidence = bearish_signals / 3
-            reason = f"Bearish market (RSI:{indicators.rsi:.1f}, BB_pos:{indicators.bb_position:.2f})"
-        
+            reason = f"Bearish market (RSI:{indicators.rsi:.1f}, BB_pos:{indicators.bb_position:.2f}) → Call Credit Spread"
+
         return StrategySelection(
             strategy_type=strategy_type,
             market_signal=market_signal,
