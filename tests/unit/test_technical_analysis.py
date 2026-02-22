@@ -122,7 +122,11 @@ class TestStrategySelector:
         assert "neutral" in selection.reason.lower()
     
     def test_select_strategy_bullish_market(self):
-        """Test strategy selection for bullish market conditions."""
+        """Test strategy selection for bullish market conditions.
+
+        Bullish bias → Put Credit Spread (sell OTM put spread; collects premium
+        below the market and profits when the market stays flat or rises).
+        """
         indicators = TechnicalIndicators(
             rsi=25.0,  # Oversold = bullish signal
             macd_line=0.5,
@@ -133,16 +137,20 @@ class TestStrategySelector:
             bb_lower=4500,
             bb_position=0.1  # Near lower band = bullish
         )
-        
+
         selection = self.selector.select_strategy(indicators)
-        
-        assert selection.strategy_type == StrategyType.CALL_SPREAD
+
+        assert selection.strategy_type == StrategyType.PUT_SPREAD
         assert selection.market_signal == MarketSignal.BULLISH
         assert selection.confidence > 0
         assert "bullish" in selection.reason.lower()
-    
+
     def test_select_strategy_bearish_market(self):
-        """Test strategy selection for bearish market conditions."""
+        """Test strategy selection for bearish market conditions.
+
+        Bearish bias → Call Credit Spread (sell OTM call spread; collects premium
+        above the market and profits when the market stays flat or falls).
+        """
         indicators = TechnicalIndicators(
             rsi=75.0,  # Overbought = bearish signal
             macd_line=-0.5,
@@ -153,10 +161,10 @@ class TestStrategySelector:
             bb_lower=4500,
             bb_position=0.9  # Near upper band = bearish
         )
-        
+
         selection = self.selector.select_strategy(indicators)
-        
-        assert selection.strategy_type == StrategyType.PUT_SPREAD
+
+        assert selection.strategy_type == StrategyType.CALL_SPREAD
         assert selection.market_signal == MarketSignal.BEARISH
         assert selection.confidence > 0
         assert "bearish" in selection.reason.lower()
